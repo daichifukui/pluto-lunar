@@ -1,0 +1,45 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: lunar
+Source: https://github.com/bill-gray/lunar
+Files-Excluded: watdefs.h
+
+Files: *
+Copyright: 2001-2018 Bill J. Gray and Project Pluto
+License: GPL-2.0+
+
+Files: gust86.*
+Copyright: 2001-2018 Bill J. Gray and Project Pluto
+           1998      Chris Marriott for SkyMap
+License: GPL-2.0+
+#
+#  Implementation of the Lascar and Jacobson theory of the
+#  motion of the satellites of Uranus.  Written by Chris Marriott for
+#  SkyMap,  with some modifications by me (Bill J. Gray).
+#  Based on :
+# 
+#   Laskar J., Jacobson, R.: 1987, GUST86 - An analytical ephemeris of the
+#   Uranian satellites, Astron. Astrophys. 188, 212-224
+#  http://articles.adsabs.harvard.edu/cgi-bin/nph-journal_query?volume=188&plate_select=NO&page=212&plate=&cover=&journal=A%2BA..
+
+
+
+Files: debian/*
+Copyright: 2018 Steffen Moeller <moeller@debian.org>
+License: GPL-2.0+
+
+License: GPL-2.0+
+ This package is free software; you can redistribute it and/or modify
+ it under the terms of the GNU General Public License as published by
+ the Free Software Foundation; either version 2 of the License, or
+ (at your option) any later version.
+ .
+ This package is distributed in the hope that it will be useful,
+ but WITHOUT ANY WARRANTY; without even the implied warranty of
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ GNU General Public License for more details.
+ .
+ You should have received a copy of the GNU General Public License
+ along with this program. If not, see <https://www.gnu.org/licenses/>
+ .
+ On Debian systems, the complete text of the GNU General
+ Public License version 2 can be found in "/usr/share/common-licenses/GPL-2".

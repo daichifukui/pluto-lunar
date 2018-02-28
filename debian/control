@@ -1,0 +1,27 @@
+Source: pluto-lunar
+Section: science
+Priority: optional
+Maintainer: Steffen Moeller <moeller@debian.org>
+Build-Depends: debhelper (>= 10), libpluto-jpl-eph-dev
+Standards-Version: 4.1.3
+Homepage: http://www.projectpluto.com/source.htm#astrocalc
+Vcs-Git: https://salsa.debian.org/debian-astro-team/pluto-lunar.git
+Vcs-Browser: https://salsa.debian.org/debian-astro-team/pluto-lunar
+
+Package: pluto-lunar
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: routines for predictions of positions in solar system
+ Basic astronomical functions for solar system ephemerides, time systems,
+ coordinate systems, etc. This includes some utilities based on these
+ functions, such as a calendar computer and a utility to numerically
+ integrate asteroid orbits.
+
+Package: libpluto-lunar-dev
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: development files for astronomical Lunar library
+ This package provides a static library and header files to reuse the
+ routines of the Lunar tools to interpret data on asteroids/comments or
+ prepare the same for submission to the Minor Planet Center.
+

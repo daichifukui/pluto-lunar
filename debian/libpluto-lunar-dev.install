@@ -1,0 +1,2 @@
+*.h	usr/include/pluto
+*.a	usr/lib

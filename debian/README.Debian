@@ -1,0 +1,21 @@
+pluto-lunar for Debian
+----------------------
+
+This package is a build-dependency for the Project Pluto's Find Orb tool.
+Because of its tininess and few expected updates, yet no effort was made
+to transform this into a shared library.
+
+The software has its root in the Windows world. This explains (in part)
+the missing man pages and the one or other divergence from behaviours
+expected from the UNIX world. It shall be considered not to offer the
+binaries of this package in /usr/bin at all to avoid the overhead to 
+comply with Debian's standards for tools that have mostly the internal
+character of testing the library's function.
+
+The final destination of binaries, libraries and include files remains
+unclear across the pluto-* packages. For the time being, the include
+files shall all to go to /usr/include/pluto while the binaries go to
+/usr/lib/pluto/<packagename> and the .a files to /usr/lib . This is not
+ultimately nice and shall develop over something more consistent.
+
+ -- Steffen Moeller <moeller@debian.org>  Wed, 28 Feb 2018 09:58:52 +0100

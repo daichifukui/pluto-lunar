@@ -1,0 +1,6 @@
+The watdefs.h file is redundant with the one shipping with the
+pluto-jpl-eph package. It was removed from the source tree in favour of
+the already existing build dependency on jpl-eph.
+
+ -- Steffen Moeller <moeller@debian.org>  Wed, 28 Feb 2018 18:34:55 +0100
+
