@@ -1,7 +1,8 @@
 Source: pluto-lunar
 Section: science
 Priority: optional
-Maintainer: Steffen Moeller <moeller@debian.org>
+Maintainer: Debian Astro Team <debian-astro-maintainers@lists.alioth.debian.org>
+Uploaders: Steffen Moeller <moeller@debian.org>
 Build-Depends: debhelper (>= 10), libpluto-jpl-eph-dev
 Standards-Version: 4.1.3
 Homepage: http://www.projectpluto.com/source.htm#astrocalc
