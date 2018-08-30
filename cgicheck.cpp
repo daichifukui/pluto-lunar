@@ -1,6 +1,24 @@
+/* Copyright (C) 2018, Project Pluto
+
+This program is free software; you can redistribute it and/or
+modify it under the terms of the GNU General Public License
+as published by the Free Software Foundation; either version 2
+of the License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program; if not, write to the Free Software
+Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+02110-1301, USA. */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "cgi_func.h"
 
 /* Code to invoke the 'astcheck' routine from an HTML form.
 You'll see a _lot_ of overlap between this and 'sat_id2.cpp',
@@ -18,9 +36,6 @@ ephemeris uncertainties.
 */
 
 int astcheck_main( const int argc, const char **argv);    /* astcheck.c */
-void avoid_runaway_process( const int max_time_to_run);   /* cgi_func.c */
-int get_multipart_form_data( const char *boundary, char *field,
-                char *buff, char *filename, const size_t max_len);
 
 int main( const int unused_argc, const char **unused_argv)
 {

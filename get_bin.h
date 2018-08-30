@@ -1,3 +1,20 @@
+/* Copyright (C) 2018, Project Pluto
+
+This program is free software; you can redistribute it and/or
+modify it under the terms of the GNU General Public License
+as published by the Free Software Foundation; either version 2
+of the License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program; if not, write to the Free Software
+Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+02110-1301, USA. */
+
 /* Code to read integers of various sizes and 64-bit double-precision
 floats from binary data buffers.  See uses in 'vsopson.cpp' and 'lunar2.cpp'
 where data is extracted from binary files.
@@ -35,6 +52,11 @@ is defined can be modified.      */
    #define get16bits(d)  (*((const uint16_t *) (d)))
    #define get32bits(d)  (*((const uint32_t *) (d)))
    #define get64bits(d)  (*((const uint64_t *) (d)))
+
+/* Signed integer extraction : */
+   #define get16sbits(d)  (*((const int16_t *) (d)))
+   #define get32sbits(d)  (*((const int32_t *) (d)))
+   #define get64sbits(d)  (*((const int64_t *) (d)))
    #define get_double(d) (*((const double *) (d)))
 #else             /* Can't directly read binary data */
    #define get16bits(d) ((((uint32_t)(((const uint8_t *)(d))[1])) << 8)\
@@ -43,6 +65,10 @@ is defined can be modified.      */
                         +(((uint32_t)(((const uint8_t *)(d))[2])) << 16)\
                         +(((uint32_t)(((const uint8_t *)(d))[1])) << 8)\
                        +(uint32_t)(((const uint8_t *)(d))[0]) )
+
+   #define get16sbits(d)  ((int16_t)( get16bits( d)))
+   #define get32sbits(d)  ((int32_t)( get32bits( d)))
+   #define get64sbits(d)  ((int64_t)( get64bits( d)))
 
 static inline double get_double( const void *iptr)
 {

@@ -1,6 +1,8 @@
-pluto-lunar (0.0~git20180227-2) UNRELEASED; urgency=medium
+pluto-lunar (0.0~git20180825.e34c1d1) UNRELEASED; urgency=medium
 
+  * New upstream commits to disambiguate copyrights
   * d/control: Formally introduce team management.
+  * d/watch: Newly introduced for github HEAD, not release.
 
  -- Steffen Moeller <moeller@debian.org>  Fri, 02 Mar 2018 11:20:43 +0100
 

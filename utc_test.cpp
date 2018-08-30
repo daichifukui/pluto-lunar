@@ -1,3 +1,20 @@
+/* Copyright (C) 2018, Project Pluto
+
+This program is free software; you can redistribute it and/or
+modify it under the terms of the GNU General Public License
+as published by the Free Software Foundation; either version 2
+of the License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program; if not, write to the Free Software
+Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+02110-1301, USA. */
+
 /* These macros determine the MJD of the given date in 'YEAR'.         */
 /* They're valid for _non-negative_ years in the _Gregorian_ calendar. */
 /* Some are not used here,  and therefore commented out,  just to      */
@@ -25,7 +42,7 @@
 int main( const int argc, const char **argv)
 {
    int year = (argc > 1 ? atoi( argv[1]) : 1970);
-   const int end_year = (argc > 2 ? atoi( argv[2]) : 2020);
+   const int end_year = (argc > 2 ? atoi( argv[2]) : 2040);
    unsigned count = 0;
 
    printf( "Leap seconds for years %d to %d\n", year, end_year);
