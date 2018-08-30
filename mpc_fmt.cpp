@@ -1,4 +1,23 @@
+/* Copyright (C) 2018, Project Pluto
+
+This program is free software; you can redistribute it and/or
+modify it under the terms of the GNU General Public License
+as published by the Free Software Foundation; either version 2
+of the License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program; if not, write to the Free Software
+Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+02110-1301, USA. */
+
 #include <stdlib.h>
+#include <assert.h>
+#include <stdio.h>
 #include <ctype.h>
 #include <string.h>
 #include <math.h>
@@ -6,6 +25,10 @@
 #include "afuncs.h"
 #include "date.h"
 #include "mpc_func.h"
+
+#if defined(_MSC_VER) && _MSC_VER < 1900
+int snprintf( char *string, const size_t max_len, const char *format, ...);
+#endif
 
 /* MPC has,  at least thus far,  only assigned MPC codes that are an uppercase
 letter followed by two digits.  Look at 'rovers.txt',  and you'll see that
@@ -140,7 +163,7 @@ double extract_date_from_mpc_report( const char *buff, unsigned *format)
    const size_t len = strlen( buff);
    unsigned i, bit, digits_mask = 0;
 
-   if( len != 80)             /* check for correct length */
+   if( len < 80 || len > 82)       /* check for correct length */
       return( 0.);
    if( buff[12] != ' ' && buff[12] != '*' && buff[12] != '-')
       return( 0.);
@@ -385,15 +408,24 @@ int get_ra_dec_from_mpc_report( const char *ibuff,
                        int *ra_format, double *ra, double *ra_precision,
                        int *dec_format, double *dec, double *dec_precision)
 {
-   int rval = 0;
+   int rval = 0, format;
+   double prec;
 
-   *ra  = get_ra_dec( ibuff + 32, ra_format, ra_precision) * (PI / 12.);
-   *ra_precision *= 15.;     /* cvt minutes/seconds to arcmin/arcsec */
-   if( *ra_format == BAD_RA_DEC_FMT)
+   *ra  = get_ra_dec( ibuff + 32, &format, &prec) * (PI / 12.);
+   if( ra_precision)
+      *ra_precision = prec * 15.;     /* cvt minutes/seconds to arcmin/arcsec */
+   if( format == BAD_RA_DEC_FMT)
       rval = -1;
-   *dec =  get_ra_dec( ibuff + 44, dec_format, dec_precision) * (PI / 180.);
-   if( *dec_format == BAD_RA_DEC_FMT)
+   if( ra_format)
+      *ra_format = format;
+
+   *dec =  get_ra_dec( ibuff + 44, &format, &prec) * (PI / 180.);
+   if( dec_precision)
+      *dec_precision = prec;
+   if( format == BAD_RA_DEC_FMT)
       rval -= 2;
+   if( dec_format)
+      *dec_format = format;
    return( rval);
 }
 
@@ -425,8 +457,8 @@ static const char *net_codes[] = {
            "vNOMAD",
            "wCMC-14",
            "xHIP-2",
-           "yHIP",
-           "zGSC-1.x",
+           "yHIP-1",
+           "zGSC",        /* no version specified */
            "AAC",
            "BSAO 1984",
            "CSAO",
@@ -469,9 +501,11 @@ NET Gaia DR1.0
 NET Gaia DR1
 NET Gaia-DR1
 NET Gaiadr1
+NET Gaia1
 
    If the names match after ignoring '.0', '-',  and spaces and
-upper/lower case,  we've almost assuredly got the right catalog.   */
+upper/lower case,  and dropping the 'DR' for Gaia,  we've almost
+assuredly got the right catalog.   */
 
 static void reduce_net_name( char *obuff, const char *ibuff)
 {
@@ -479,6 +513,8 @@ static void reduce_net_name( char *obuff, const char *ibuff)
       if( *ibuff == '-' || *ibuff == ' ')
          ibuff++;
       else if( ibuff[0] == '.' && ibuff[1] == '0')
+         ibuff += 2;
+      else if( ibuff[0] == 'D' && ibuff[1] == 'R')
          ibuff += 2;
       else
          *obuff++ = toupper( *ibuff++);
@@ -499,5 +535,138 @@ char net_name_to_byte_code( const char *net_name)
       }
    if( !rval)     /* didn't find it */
       rval = '?';
+   return( rval);
+}
+
+/* "Mutant hex" uses the usual hex digits 0123456789ABCDEF for numbers
+0 to 15,  followed by G...Z for 16...35 and a...z for 36...61.  MPC stores
+epochs and certain other numbers using this scheme to save space.  */
+
+static char mutant_hex( const int ival)
+{
+   int rval = -1;
+
+   if( ival >= 0)
+      {
+      if( ival < 10)
+         rval = '0';
+      else if( ival < 36)
+         rval = 'A' - 10;
+      else if( ival < 62)
+         rval = 'a' - 36;
+      }
+   assert( rval >= 0);
+   return( (char)( rval + ival));
+}
+
+/* create_mpc_packed_desig( ) takes a "normal" name for a comet/asteroid,
+such as P/1999 Q1a or 2005 FF351,  and turns it into the 12-byte packed
+format used in MPC reports and element files.  Documentation of this format
+is given on the MPC Web site.  A 'test main' at the end of this file
+shows the usage of this function.
+   This should handle all "normal" asteroid and comet designations.
+It doesn't handle natural satellites.  */
+
+int create_mpc_packed_desig( char *packed_desig, const char *obj_name)
+{
+   int i, j, rval = 0;
+   unsigned number;
+   char buff[20], comet_desig = 0;
+
+   while( *obj_name == ' ')
+      obj_name++;
+
+               /* Check for comet-style desigs such as 'P/1995 O1' */
+               /* and such.  Leading character can be P, C, X, D, or A. */
+               /* Or 'S' for natural satellites.  */
+   if( strchr( "PCXDAS", *obj_name) && obj_name[1] == '/')
+      {
+      comet_desig = *obj_name;
+      obj_name += 2;
+      }
+
+               /* Create a version of the name with all spaces removed: */
+   for( i = j = 0; obj_name[i] && j < 19; i++)
+      if( obj_name[i] != ' ')
+         buff[j++] = obj_name[i];
+   buff[j] = '\0';
+
+   memset( packed_desig, ' ', 12);
+   packed_desig[12] = '\0';
+   number = atoi( buff);
+   i = 0;
+   while( isdigit( buff[i]))
+      i++;
+   if( buff[i] == 'P' && buff[i + 1] == '\0' && number < 10000)
+      snprintf( packed_desig, 13, "%04uP       ", number);
+               /* If the name starts with four digits followed by an */
+               /* uppercase letter,  it's a provisional designation: */
+   else if( number > 999 && number < 9000 && isupper( buff[4]))
+      {
+      int sub_designator;
+
+      for( i = 0; i < 4; i++)
+         {
+         const char *surveys[4] = { "P-L", "T-1", "T-2", "T-3" };
+
+         if( !strcmp( buff + 4, surveys[i]))
+            {
+            const char *surveys_packed[4] = {
+                     "PLS", "T1S", "T2S", "T3S" };
+
+            memcpy( packed_desig + 8, buff, 4);
+            memcpy( packed_desig + 5, surveys_packed[i], 3);
+            return( rval);
+            }
+         }
+
+      snprintf( packed_desig + 5, 4, "%c%02d",
+                  mutant_hex( number / 100), number % 100);
+      packed_desig[6] = buff[2];    /* decade */
+      packed_desig[7] = buff[3];    /* year */
+
+      packed_desig[8] = (char)toupper( buff[4]);    /* prelim desigs are */
+      i = 5;                                        /* _very_ scrambled  */
+      if( isupper( buff[i]))                        /* when packed:      */
+         {
+         packed_desig[11] = buff[i];
+         i++;
+         }
+      else
+         packed_desig[11] = '0';
+
+      sub_designator = atoi( buff + i);
+      assert( sub_designator >= 0 && sub_designator < 620);
+      packed_desig[10] = mutant_hex( sub_designator % 10);
+      packed_desig[9] = mutant_hex( sub_designator / 10);
+      if( comet_desig)
+         {
+         packed_desig[4] = comet_desig;
+         while( isdigit( buff[i]))
+            i++;
+         if( buff[i] >= 'a' && buff[i] <= 'z')
+            packed_desig[11] = buff[i];
+         }
+      }
+   else if( !buff[i] && number < 620000
+               && (!comet_desig || number < 10000))
+      {                         /* simple numbered asteroid or comet */
+      const int number = atoi( buff);
+
+      if( comet_desig)
+         sprintf( packed_desig, "%04d%c       ", number, comet_desig);
+      else
+         sprintf( packed_desig, "%c%04d       ", mutant_hex( number / 10000),
+               number % 10000);
+      }
+   else                 /* strange ID that isn't decipherable.  For this, */
+      {                 /* we just copy the first eleven non-space bytes, */
+      while( j < 11)                              /* padding with spaces. */
+         buff[j++] = ' ';
+      buff[11] = '\0';
+      *packed_desig = '~';
+      strcpy( packed_desig + 1, buff);
+      rval = -1;
+      }
    return( rval);
 }

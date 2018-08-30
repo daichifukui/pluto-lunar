@@ -22,44 +22,31 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <assert.h>
 #include "watdefs.h"
 #include "date.h"
 #include "comets.h"
 #include "afuncs.h"
+#include "mpc_func.h"
 
 #define PI 3.1415926535897932384626433832795028841971693993751058209749445923
 #define LOG_10 2.3025850929940456840179914546843642076011014886287729760333279009675726
 const double radians_to_arcsec = 180. * 3600. / PI;
 
 int get_earth_loc( const double t_millennia, double *results);
-long extract_mpcorb_dat( ELEMENTS *elem, const char *buff);   /* mpcorb.c */
-long extract_astorb_dat( ELEMENTS *elem, const char *buff);   /* mpcorb.c */
+int extract_sof_data( ELEMENTS *elem, const char *buff, const char *header);
 
 static int get_mpc_data( const char *buff, double *jd, double *ra, double *dec)
 {
-   int i1, i2, year, month;
-   double tval, day;
+   int err_code;
 
    if( strlen( buff) < 80 || strlen( buff) > 83)
-      return( -1);
-   if( sscanf( buff + 32, "%d %d %lf", &i1, &i2, &tval) != 3)
-      return( -2);
-   *ra = ((double)i1 + (double)i2 / 60. + tval / 3600.) * (PI / 12.);
-
-   if( sscanf( buff + 45, "%d %d %lf", &i1, &i2, &tval) != 3)
-      return( -3);
-   *dec = ((double)i1 + (double)i2 / 60. + tval / 3600.) * (PI / 180.);
-   if( buff[44] == '-')
-      *dec = -*dec;
-   else if( buff[44] != '+')
-      return( -4);
-
-               /* Read in the day/month/year from the record... */
-   if( sscanf( buff + 15, "%d %d %lf", &year, &month, &day) != 3)
-      return( -5);
-               /* ...and convert to a JD: */
-   *jd = day + (double)dmy_to_day( 0, month, year, 0) - .5;
-   return( 0);
+      err_code = -5;
+   else
+      err_code = get_ra_dec_from_mpc_report( buff, NULL, ra, NULL,
+                                                NULL, dec, NULL);
+   *jd = extract_date_from_mpc_report( buff, NULL);
+   return( err_code);
 }
 
 static inline double law_of_cosines( const double a, const double b, const double c)
@@ -72,7 +59,9 @@ static double calc_obs_magnitude( ELEMENTS *elem, const double obj_sun,
 {
    double magnitude;
 
-   if( !elem->is_asteroid)
+   if( !elem->abs_mag)
+      magnitude = 0.;
+   else if( !elem->is_asteroid)
       magnitude = elem->slope_param * log( obj_sun);
    else
       {
@@ -111,18 +100,19 @@ AST_DATA
    };
 #pragma pack( )
 
-static FILE *orbits_file;
-static int n_asteroids, astorb_epoch, record_length;
-int verbose = 0;
-static int n_numbered, using_mpcorb = 0;
-static size_t mpcorb_header_length;
-const char *data_path = NULL;
+#define MAX_SOF_SIZE 200
 
-FILE *get_mpcorb_file( void)
+static FILE *orbits_file;
+static int n_asteroids, record_length;
+int verbose = 0;
+const char *data_path = NULL;
+char sof_header[MAX_SOF_SIZE];
+int32_t sof_checksum;
+
+static FILE *get_sof_file( const char *filename)
 {
-   const char *filename = "mpcorb.dat";
    FILE *ifile = fopen( filename, "rb");
-   char buff[250];
+   char buff[450];
 
    if( !ifile && data_path)
       {
@@ -133,82 +123,38 @@ FILE *get_mpcorb_file( void)
 
    if( ifile)
       {
-      int lines_read = 0, i;
+      int filelen;
+      size_t i, j;
 
       if( !fgets( buff, sizeof( buff), ifile))
          {
-         printf( "Unable to read mpcorb.dat\n");
+         fprintf( stderr, "Unable to read '%s'\n", filename);
          exit( -4);
          }
-      for( i = 0; buff[i]; i++)
-         if( buff[i] == '.')
-            buff[i] = ' ';
-      if( i > 70)       /* put date into YYYYMMDD form */
-         {
-         const double jd = get_time_from_string( 0., buff + 60, 0, NULL);
-
-         full_ctime( buff, jd, FULL_CTIME_YMD | FULL_CTIME_NO_SPACES
-                     | FULL_CTIME_DATE_ONLY | FULL_CTIME_MONTHS_AS_DIGITS
-                     | FULL_CTIME_LEADING_ZEROES);
-         astorb_epoch = atol( buff);
-         }
-      while( lines_read < 50 && !mpcorb_header_length &&
-                                      fgets( buff, sizeof( buff), ifile))
-         {
-         lines_read++;
-         if( *buff == '-')    /* we've read the entire header */
-            mpcorb_header_length = ftell( ifile);
-         }
-      record_length = 203;
+      record_length = (int)strlen( buff);
+      assert( record_length < MAX_SOF_SIZE);
+      strcpy( sof_header, buff);
       fseek( ifile, 0L, SEEK_END);
-      n_asteroids = (int)(ftell( ifile) - mpcorb_header_length) / record_length;
-      fseek( ifile, 0L, SEEK_SET);
-      if( verbose)
-         printf( "MPCORB epoch: %d; %d objects; record size %d\n",
-               astorb_epoch, n_asteroids, record_length);
-      }
-   return( ifile);
-}
-
-FILE *get_astorb_file( void)
-{
-   const char *filename = "astorb.dat";
-   FILE *ifile = fopen( filename, "rb");
-   char tbuff[300];
-
-   if( !ifile && data_path)
-      {
-      strcpy( tbuff, data_path);
-      strcat( tbuff, filename);
-      ifile = fopen( tbuff, "rb");
-      }
-
-   if( ifile)
-      {
-      long filesize;
-
-      if( !fgets( tbuff, sizeof( tbuff), ifile))
+      filelen = ftell( ifile);
+      if( filelen % record_length)
          {
-         printf( "Unable to read astorb.dat\n");
+         printf( "'%s' appears to be corrupted.\n", filename);
          exit( -5);
          }
-      record_length = (int)strlen( tbuff);
-      fseek( ifile, 0L, SEEK_END);
-      filesize = ftell( ifile);
-      n_asteroids = filesize / record_length;
-      fseek( ifile, 0L, SEEK_SET);
-      astorb_epoch = atoi( tbuff + 207);
-                  /* File size should be an even multiple of the */
-                  /* record size... if not,  something's off:    */
-      if( filesize != n_asteroids * record_length)
+      n_asteroids = filelen / record_length;
+      for( i = 0; i < 4; i++)
          {
-         printf( "ASTORB file size appears to be wrong: %ld\n",
-                  filesize);
-         verbose++;
+         const int32_t big_prime = 1234567891;
+
+         fseek( ifile, (long)( i * (filelen - sizeof( buff))) / 3L, SEEK_SET);
+         if( fread( buff, sizeof( buff), 1, ifile))
+            for( j = 0; j < sizeof( buff); j++)
+               sof_checksum = sof_checksum * big_prime + (int32_t)buff[i];
          }
+      fseek( ifile, 0L, SEEK_SET);
       if( verbose)
-         printf( "ASTORB epoch: %d; %d objects; record size %d\n",
-               astorb_epoch, n_asteroids, record_length);
+         printf( "'%s': %d objects; record size %d\n",
+                      filename, n_asteroids, record_length);
       }
    return( ifile);
 }
@@ -237,51 +183,6 @@ static double compute_asteroid_loc( const double *earth_loc,
    return( r1);
 }
 
-
-/* Six records in 'astorb.dat' contained ASCII zeroes in columns where the */
-/* taxonomic class ought to be.  So for 'astorb',  we zero everything out. */
-
-/* MPCORB has an intentional design flaw:  a line feeds is inserted after  */
-/* the numbered objects,  and again after the multi-opp objects.  Hence,   */
-/* we read in two bytes and check for line feeds,  which would indicate    */
-/* we're actually a bit ahead of the record.                               */
-
-static int get_orbit_rec( char *buff)
-{
-   int rval;
-
-   if( using_mpcorb)
-      {
-      int bytes_read;
-
-      if( !fread( buff, 2, 1, orbits_file))
-         return( 0);
-      if( buff[1] == 10)         /* single-opp object */
-         bytes_read = 0;
-      else if( buff[0] == 10)    /* multi-opp object */
-         {
-         buff[0] = buff[1];
-         bytes_read = 1;
-         }
-      else        /* numbered object */
-         bytes_read = 2;
-      rval = (int)fread( buff + bytes_read, record_length - bytes_read, 1, orbits_file);
-      }
-   else
-      {
-      int i;
-
-      rval = (int)fread( buff, record_length, 1, orbits_file);
-      if( rval)
-         for( i = 0; i < record_length; i++)
-            if( !buff[i])
-               buff[i] = ' ';
-      }
-   return( rval);
-}
-
-int16_t *ephem_uncertainties = NULL;
-
 AST_DATA *compute_day_data( const long ijd)
 {
    char tbuff[300];
@@ -300,46 +201,28 @@ AST_DATA *compute_day_data( const long ijd)
       return( NULL);
       }
    get_earth_loc( (jd      - 2451545.) / 365250., earth_loc);
-   fseek( orbits_file, (long)mpcorb_header_length, SEEK_SET);
+   fseek( orbits_file, (long)record_length, SEEK_SET);
    tbuff[record_length] = '\0';
-   for( i = 0; i < n_asteroids && get_orbit_rec( tbuff); i++)
+   for( i = 0; i < n_asteroids && fgets( tbuff, sizeof( tbuff), orbits_file); i++)
       {
       ELEMENTS class_elem;
-      const double curr_ephem_unc = atof( tbuff + 190);
       double ra, dec;
 
-      if( using_mpcorb)
+      if( extract_sof_data( &class_elem, tbuff, sof_header))
          {
-         if( !extract_mpcorb_dat( &class_elem, tbuff))
-            {
-            printf( "'mpcorb.dat' data doesn't parse correctly:\n%s\n", tbuff);
-            exit( -1);
-            }
+         printf( "'mpcorb.sof' data doesn't parse correctly:\n%s\n", tbuff);
+         exit( -1);
          }
-      else
-         if( !extract_astorb_dat( &class_elem, tbuff))
-            {
-            printf( "'astorb.dat' data doesn't parse correctly:\n%s\n", tbuff);
-            exit( -1);
-            }
 
       compute_asteroid_loc( earth_loc, &class_elem, jd, &ra, &dec);
 
       rval[i].ra = integerize_angle( ra);
       rval[i].dec = integerize_angle( dec);
-      if( curr_ephem_unc < 32000.)
-         ephem_uncertainties[i] = (int16_t)curr_ephem_unc;
-      else        /* store large values in arcminutes */
-         ephem_uncertainties[i] = (int16_t)(-curr_ephem_unc / 60.);
       if( verbose && counter <= i * 80 / n_asteroids)
          {
          printf( "%d", counter % 10);
          counter++;
          }
-      if( using_mpcorb && tbuff[173] == ')')
-         n_numbered = i + 1;
-      if( !using_mpcorb && tbuff[5] != ' ')
-         n_numbered = i + 1;
       }
    if( verbose)
       printf( "\nTime: %.1f seconds\n",
@@ -360,17 +243,11 @@ static double centralize_angle( double ang)
 /* the geocentric position of each asteroid as of a certain day),  we */
 /* attempt to open a file for that day of the form YYYYMMDD.chk.  If  */
 /* the file is opened,  and the header indicates the correct version, */
-/* number of asteroids,  and astorb epoch,  we just load up the data  */
+/* number of asteroids,  and checksum, we just load up the data       */
 /* from the file and return.                                          */
 /*   If we don't find the file,  or the header doesn't match,  then   */
 /* we call the above 'compute_day_data',  and write that data out to  */
 /* a .chk file so we don't have to recompute it all the next time.    */
-/*   The first time this function is called,  we also load current    */
-/* ephemeris uncertainty data,  either from the 'curr_unc' file (if   */
-/* the header matched) or from astorb.dat itself (if it didn't.)      */
-/*    NOTE that if we're using mpcorb.dat instead of astorb.dat,  the */
-/* extension is changed to .chl.  Thus,  one can maintain .chl files  */
-/* for mpcorb,  and .chk ones for astorb,  without collisions.        */
 
 #define HEADER_SIZE 4
 
@@ -381,19 +258,12 @@ static AST_DATA *get_cached_day_data( const int ijd)
    int32_t header[HEADER_SIZE];
    const int32_t magic_version_number = 1314159266;
    AST_DATA *rval;
-   int uncertainties_loaded = (ephem_uncertainties != NULL);
-
-   if( !ephem_uncertainties)
-      ephem_uncertainties = (int16_t *)malloc( n_asteroids * sizeof( int16_t));
-   if( !ephem_uncertainties)
-      return( NULL);
-
 
                   /* Create a filename in 'YYYYMMDD.chk' form: */
    full_ctime( filename, (double)ijd, FULL_CTIME_YMD | FULL_CTIME_NO_SPACES
                      | FULL_CTIME_DATE_ONLY | FULL_CTIME_MONTHS_AS_DIGITS
                      | FULL_CTIME_LEADING_ZEROES);
-   strcat( filename, (using_mpcorb ? ".chl" : ".chk"));
+   strcat( filename, ".chk");
    if( verbose > 2)
       printf( "Creating '%s'\n", filename);
    ifile = fopen( filename, "rb");
@@ -405,7 +275,7 @@ static AST_DATA *get_cached_day_data( const int ijd)
          exit( -2);
          }
       if( header[0] != magic_version_number
-                   || header[1] != astorb_epoch || header[2] != n_asteroids)
+                   || header[1] != sof_checksum || header[2] != n_asteroids)
          fclose( ifile);
       else   /* appears to be legitimate cached data */
          {
@@ -415,39 +285,25 @@ static AST_DATA *get_cached_day_data( const int ijd)
             printf( "Ran out of memory\n");
             exit( -4);
             }
-         n_numbered = header[3];
          if( !fread( rval, n_asteroids, sizeof( AST_DATA), ifile))
             {
             printf( "Error in asteroid data in '%s'\n", filename);
             exit( -3);
             }
          fclose( ifile);
-         if( !uncertainties_loaded)
-            {
-            ifile = fopen( "curr_unc", "rb");
-            if( !fread( ephem_uncertainties, n_asteroids, sizeof( int16_t), ifile))
-               {
-               printf( "Error in asteroid uncertainty data\n");
-               exit( -4);
-               }
-            fclose( ifile);
-            }
          return( rval);
          }
       }
    rval = compute_day_data( ijd);
    header[0] = magic_version_number;
-   header[1] = astorb_epoch;
+   header[1] = sof_checksum;
    header[2] = n_asteroids;
-   header[3] = n_numbered;
+   header[3] = -1;         /* not currently used */
    ofile = fopen( filename, "wb");
    fwrite( header, HEADER_SIZE, sizeof( int), ofile);
    fwrite( rval, n_asteroids, sizeof( AST_DATA), ofile);
    fclose( ofile);
 
-   ofile = fopen( "curr_unc", "wb");
-   fwrite( ephem_uncertainties, n_asteroids, sizeof( int16_t), ofile);
-   fclose( ofile);
    return( rval);
 }
 
@@ -512,19 +368,19 @@ static double compute_motion( const char **lines, const int n_lines,
          double ra1, dec1, jd1;
          const double five_degrees = PI / 36.;
 
-         get_mpc_data( lines[i], &jd1, &ra1, &dec1);
-         if( fabs( jd1 - jd) < 10.)   /* within ten days... */
-            if( fabs( ra1 - ra) < five_degrees)
-               if( fabs( dec1 - dec) < five_degrees)
-                  {
-                  *ra_motion = (ra1 - ra) / (jd1 - jd);
-                  *dec_motion = (dec1 - dec) / (jd1 - jd);
-                  *ra_motion *= cos( dec);
-                           /* cvt radians/day to arcsec/hr: */
-                  *ra_motion *= radians_to_arcsec  / 24.;
-                  *dec_motion *= radians_to_arcsec / 24.;
-                  rval = jd1;
-                  }
+         if( !get_mpc_data( lines[i], &jd1, &ra1, &dec1)
+                && fabs( jd1 - jd) < 10.   /* within ten days... */
+                && fabs( ra1 - ra) < five_degrees
+                && fabs( dec1 - dec) < five_degrees)
+            {
+            *ra_motion = (ra1 - ra) / (jd1 - jd);
+            *dec_motion = (dec1 - dec) / (jd1 - jd);
+            *ra_motion *= cos( dec);
+                     /* cvt radians/day to arcsec/hr: */
+            *ra_motion *= radians_to_arcsec  / 24.;
+            *dec_motion *= radians_to_arcsec / 24.;
+            rval = jd1;
+            }
          }
    return( rval);
 }
@@ -559,70 +415,25 @@ static void err_message( void)
 {
    printf( "\nastcheck needs the name of a file containing MPC-formatted (80-column)\n");
    printf( "astrometric data.  It will then attempt to match the records to known\n");
-   printf( "objects in the 'astorb.dat' file.\n\n");
+   printf( "objects in the 'mpcorb.sof' file.\n\n");
    printf( "Command-line options are:\n\n");
    printf( "   -r(dist)   Set search distance to 'dist' arcseconds. Default is 3600.\n");
    printf( "   -z(tol)    Set motion match tolerance to 'tol' arcsec/hr. Default is 10.\n");
    printf( "   -m(mag)    Set limiting mag to 'mag'.  Default is 22.\n");
-   printf( "   -M         Use MPCORB,  not ASTORB.\n");
    printf( "   -l         Show distance from line of variations. Experimental.\n");
 }
 
-#ifdef USE_CEU_DATA
-static int16_t cvt_tolerance( int16_t arcseconds)
-{
-// double tval = (double)arcseconds;
-//
-// if( tval < 0.)        /* "huge" value,  in arcminutes: */
-//    tval = -tval / 60.;
-// return( (int16_t)( tval * 65536. / (360. * 3600.)));
-   if( arcseconds >= 0)
-      return( arcseconds / 3);
-   else          /* more than 32000 arcsec */
-      return( 32000 / 3);
-}
-#endif
-
-static void show_astorb_info( void)
+static void show_astcheck_info( void)
 {
    printf( "ASTCHECK version %s %s\n", __DATE__, __TIME__);
-   printf( "%s version %04d %02d %02d,  with %d objects (%d numbered)\n",
-            (using_mpcorb ? "mpcorb.dat" : "astorb.dat"),
-            astorb_epoch / 10000, (astorb_epoch / 100) % 100,
-            astorb_epoch % 100, n_asteroids, n_numbered);
+   printf( "%d objects\n", n_asteroids);
 }
 
-#ifdef _MSC_VER
-     /* Microsoft Visual C/C++ has no snprintf.  Yes,  you read that      */
-     /* correctly.  MSVC has an _snprintf which doesn't add a '\0' at the */
-     /* end if max_len bytes are written.  You can't pass a NULL string   */
-     /* to determine the necessary buffer size.  The following, however,  */
-     /* is a "good enough" replacement:  for a non-NULL string, the       */
-     /* output will be "correct" (the '\0' will always be present and in  */
-     /* the right place).  The only deviation from "proper" sprintf() is  */
-     /* that the maximum return value is max_len;  you can never know how */
-     /* many bytes "should" have been written.                            */
-     /*   Somewhat ancient MSVCs don't even have vsnprintf;  you have to  */
-     /* use vsprintf and work things out so you aren't overwriting the    */
-     /* end of the buffer.                                                */
-#include <stdarg.h>
-
-int snprintf( char *string, const size_t max_len, const char *format, ...)
-{
-   va_list argptr;
-   int rval;
-
-   va_start( argptr, format);
-#if _MSC_VER <= 1100
-   rval = vsprintf( string, format, argptr);
-#else
-   rval = vsnprintf( string, max_len, format, argptr);
+#if defined(_MSC_VER) && _MSC_VER < 1900
+                      /* For older MSVCs,  we have to supply our own  */
+                      /* snprintf().  See snprintf.cpp for details.  */
+int snprintf( char *string, const size_t max_len, const char *format, ...);
 #endif
-   string[max_len - 1] = '\0';
-   va_end( argptr);
-   return( rval);
-}
-#endif    /* #ifdef _MSC_VER */
 
 #define MAX_RESULTS 500
 
@@ -634,10 +445,11 @@ int main( const int argc, const char **argv)
 {
    double jd, ra, dec;
    FILE *ifile;
+   const char *sof_filename = "mpcorb.sof";
    char buff[90];
    char **ilines;
-   int show_lov = 0, show_uncertainty = 0;
-   int i, n_ilines = 0, n, unnumbered_only = 0;
+   int show_lov = 0;
+   int i, n_ilines = 0, n;
    int n_lines_printed = 0;
    double tolerance_in_arcsec = 18000.;       /* = five degrees */
    double mag_limit = 22.;
@@ -668,9 +480,6 @@ int main( const int argc, const char **argv)
             case 'm':
                mag_limit = atof( argv[i] + 2);
                break;
-            case 'M':
-               using_mpcorb = 1;
-               break;
             case 'p':
                data_path = argv[i] + 2;
                break;
@@ -680,11 +489,13 @@ int main( const int argc, const char **argv)
             case 'z':
                motion_tolerance = atof( argv[i] + 2);
                break;
-            case 'u':
-               unnumbered_only = 1;
-               break;
+#ifdef NOT_READY_QUITE_YET
             case 'e':
                show_uncertainty = 1;
+               break;
+#endif
+            case 'f':
+               sof_filename = argv[i] + 2;
                break;
             default:
                printf( "%s: unrecognized command-line option\n", argv[i]);
@@ -699,20 +510,10 @@ int main( const int argc, const char **argv)
    ifile = fopen( argv[1], "rb");
    if( !ifile)
       printf( "%s not opened\n", argv[1]);
-   if( using_mpcorb)
-      orbits_file = get_mpcorb_file( );
-   else
-      {
-      orbits_file = get_astorb_file( );
-      if( !orbits_file)     /* astorb failed;  let's try mpcorb.dat */
-         {
-         orbits_file = get_mpcorb_file( );
-         using_mpcorb = 1;
-         }
-      }
+   orbits_file = get_sof_file( sof_filename);
    if( !orbits_file)
       {
-      printf( "Couldn't find astorb.dat");
+      printf( "Couldn't open '%s'\n", sof_filename);
       err_message( );
       return( -2);
       }
@@ -795,7 +596,7 @@ int main( const int argc, const char **argv)
             }
          if( !n)     /* on our very first object: */
             {
-            show_astorb_info( );
+            show_astcheck_info( );
             printf( "An explanation of these data is given at the bottom of the list.\n");
             printf( "                             d_ra   d_dec    dist    mag  motion \n");
             }
@@ -820,14 +621,12 @@ int main( const int argc, const char **argv)
          else
             printf( "\n%s: only one observation\n", buff);
          n_lines_printed++;
-         for( i = (unnumbered_only ? n_numbered : 0); i < n_asteroids; i++)
+         for( i = 0; i < n_asteroids; i++)
             {
-#ifdef USE_CEU_DATA
-            const int16_t tolerance2 = tolerance + cvt_tolerance( day_data[i].uncertainty);
-#else
             const int16_t tolerance2 = tolerance;
-#endif
 
+            assert( day_data[0]);
+            assert( day_data[1]);
             if( is_between( day_data[0][i].ra, day_data[1][i].ra, int_ra, tolerance2 + 5))
                if( is_between( day_data[0][i].dec, day_data[1][i].dec, int_dec, tolerance2 + 5))
                   {
@@ -836,31 +635,16 @@ int main( const int argc, const char **argv)
                   double earth_obj_dist, dist;
 
                   n_checked++;
-                  fseek( orbits_file, i * record_length + (long)mpcorb_header_length, SEEK_SET);
-                  get_orbit_rec( tbuff);
-                  if( using_mpcorb)
+                  fseek( orbits_file, (i + 1) * record_length, SEEK_SET);
+                  if( !fgets( tbuff, sizeof( tbuff), orbits_file) ||
+                           extract_sof_data( &class_elem, tbuff, sof_header))
                      {
-                     extract_mpcorb_dat( &class_elem, tbuff);
-                     memcpy( tbuff, tbuff + 166, 26);
+                     fprintf( stderr, "Couldn't read .sof elements\n");
+                     exit( -1);
                      }
-                  else
-                     {
-                     extract_astorb_dat( &class_elem, tbuff);
-                     memmove( tbuff + 9, tbuff + 7, 17);
-                     if( tbuff[5] != ' ')    /* a numbered object */
-                        {
-                        size_t j;
-
-                        sprintf( tbuff, "%7d)", atoi( tbuff));
-                        tbuff[8] = ' ';
-                        for( j = 1; tbuff[j] == ' '; j++)
-                           ;
-                        tbuff[j - 1] = '(';
-                        }
-                     else              /* unnumbered:  leave blanks */
-                        memset( tbuff, ' ', 9);
-                     }
-                  tbuff[26] = '\0';
+                  class_elem.is_asteroid = 1;
+                  if( tbuff[1] == '/' || strchr( "APXCD", tbuff[3]))
+                     class_elem.is_asteroid = 0;   /* it's a comet */
                   earth_obj_dist = compute_asteroid_loc( earth_loc, &class_elem, jd,
                            &ra1, &dec1);
                   mag = calc_obs_magnitude( &class_elem, obj_sun_dist,
@@ -907,6 +691,9 @@ int main( const int argc, const char **argv)
                               -ra1 * radians_to_arcsec,
                               -dec1 * radians_to_arcsec, dist,
                               mag, computed_ra_motion, computed_dec_motion);
+                        if( !class_elem.abs_mag)
+                           memset( tbuff + 49, '-', 4);
+                        memset( tbuff + 12, ' ', 14);
 //                      snprintf( tbuff + strlen( tbuff), sizeof( tbuff) - strlen( tbuff),
 //                                            "  %.4f", earth_obj_dist);
                         if( show_lov)
@@ -914,16 +701,6 @@ int main( const int argc, const char **argv)
                                            sizeof( tbuff) - strlen( tbuff),
                                            "  %6.0f",
                                            dist_from_lov * radians_to_arcsec);
-                        if( show_uncertainty)
-                           {
-                           int uncertainty = (int)ephem_uncertainties[i];
-
-                           if( uncertainty < 0)
-                              uncertainty *= -60;
-                           snprintf( tbuff + strlen( tbuff),
-                                       sizeof( tbuff) - strlen( tbuff),
-                                       "  %d\"", uncertainty);
-                           }
                         for( j = 0; j < n_results
                                      && atof( results[j] + 39) < dist; j++)
                            ;
@@ -966,8 +743,8 @@ int main( const int argc, const char **argv)
    printf( "\nRun time: %.1f seconds\n",
                   (double)clock( ) / (double)CLOCKS_PER_SEC);
                      /* If the output was quite long,  re-display */
-                     /* the 'astorb' information:                 */
+                     /* the explanation of the output :           */
    if( n_lines_printed > 40)
-      show_astorb_info( );
+      show_astcheck_info( );
    return( 0);
 }

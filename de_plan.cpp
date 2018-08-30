@@ -29,8 +29,6 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
 #define POISSON struct poisson
 #define POISSON_HEADER struct poisson_header
 
-#pragma pack(2)
-
 POISSON
    {
    double tzero, dt;
@@ -39,6 +37,8 @@ POISSON
    double *fqs, *terms;
    int16_t nf[3];
    };
+
+#pragma pack(2)
 
 POISSON_HEADER
    {
@@ -60,15 +60,14 @@ of bits tells you if a given coefficient is stored as a char,  int16_t,
 int,  or full double.  Finally,  the number of bytes that were parsed
 is returned.
 
-   At one time,  it appeared as if Microsoft C had an optimization
-issue here,  so I turned optimizations off for some code.  I can no longer
-replicate this.  Just in case the issue recrudesces,  I'll comment out the
-optimization pragmas,  rather than remove them outright.
-
    (2012 Jan 17) The function is used exactly once,  from within this
-file,  and therefore should be 'static inline'.          */
+file,  and therefore should be 'static inline'.
 
-// #pragma optimize( "", off)
+   (2018 May 1) Puzzled out a longstanding MSVC optimization issue.
+With optimizations turned on,  you _cannot_ simply extract a signed
+32-bit integer;  it'll always be treated as unsigned.  Various
+workarounds are, of course,  possible.  This was the simplest.  Not all
+that efficient, but elderly MSVC isn't a high priority these days. */
 
 static inline int unpack_six_doubles( double *ovals, const char *ibuff)
 {
@@ -83,12 +82,20 @@ static inline int unpack_six_doubles( double *ovals, const char *ibuff)
             *ovals++ = (double)*iptr++;
             break;
          case 1:
-            *ovals++ = (double)((int16_t)get16bits( iptr));
+            *ovals++ = (double)get16sbits( iptr);
             iptr += 2;
             break;
          case 2:
-            *ovals++ = (double)((int32_t)get32bits( iptr));
+            *ovals++ = (double)get32sbits( iptr);
             iptr += 4;
+#if defined(_MSC_VER) && _MSC_VER < 1900
+            {
+            const double two_31 = 2147483648.;
+
+            if( ovals[-1] > two_31)
+               ovals[-1] -= 2. * two_31;
+            }
+#endif
             break;
          case 3:
             *ovals++ = get_double( iptr);
@@ -208,10 +215,6 @@ int DLL_FUNC unload_ps1996_series( void *p)
    return( 0);
 }
 
-/*  See comment above about possible optimization issues that appear
-to have been resolved,  but I'm not sure: */
-// #pragma optimize( "", on)
-
 /* I will have to mumble concerning much of what the following function
 does.  There are parts I don't understand,  and parts that are
 mathematically tricky enough that I don't want to spend much time
@@ -241,7 +244,7 @@ int DLL_FUNC get_ps1996_position( const double jd, const void *iptr,
    double wx = 1.;
    double xpower[5];
 
-     if( jd < p->tzero || jd > p->tzero + p->dt)
+   if( jd < p->tzero || jd > p->tzero + p->dt)
       return( -1);
    xpower[0] = xpower[1] = 1.;
    for( i = 2; i < 5; i++)
@@ -310,12 +313,23 @@ int DLL_FUNC get_ps1996_position( const double jd, const void *iptr,
 }
 
 #ifdef TEST_CODE
-int main( int argc, char **argv)
+
+/* Example run,  giving heliocentric J2000 equatorial state
+vector for Mars as of JD 2458239.5 = 2018 May 1 TDB :
+
+../lunar/de_plan 4 2458239.5
+Series loaded
+-0.435280249 -1.303106084 -0.585949939  1.493616984
+0.013913669 -0.002480622 -0.001513357
+*/
+
+int main( const int argc, const char **argv)
 {
-   double state_vect[6];
-   double t0 = atof( argv[2]), r;
+   double state_vect[6], r;
+   const double t0 = atof( argv[2]);
    void *p;
    FILE *ifile;
+   int rval;
 
    if( argc < 3)
       {
@@ -337,15 +351,20 @@ int main( int argc, char **argv)
       return( -1);
       }
    printf( "Series loaded\n");
-   get_ps1996_position( t0, p, state_vect, 1);
-   free( p);
-   r = state_vect[0] * state_vect[0] + state_vect[1] * state_vect[1] +
+   rval = get_ps1996_position( t0, p, state_vect, 1);
+   unload_ps1996_series( p);
+   if( rval)
+      printf( "Error occurred: rval %d\n", rval);
+   else
+      {
+      r = state_vect[0] * state_vect[0] + state_vect[1] * state_vect[1] +
                         state_vect[2] * state_vect[2];
 
-   printf( "%.9lf %.9lf %.9lf  %.9lf\n", state_vect[0], state_vect[1],
+      printf( "%.9lf %.9lf %.9lf  %.9lf\n", state_vect[0], state_vect[1],
             state_vect[2], sqrt( r));
-   printf( "%.9lf %.9lf %.9lf\n", state_vect[3], state_vect[4],
+      printf( "%.9lf %.9lf %.9lf\n", state_vect[3], state_vect[4],
             state_vect[5]);
-   return( 0);
+      }
+   return( rval);
 }
 #endif

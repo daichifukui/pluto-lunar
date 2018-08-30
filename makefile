@@ -5,12 +5,16 @@
 #
 # where tgt can be any of:
 # [all|astcheck|astephem|calendar... clean]
+# [install|install_integrat]
 #
 #	'XCOMPILE' = cross-compile for Windows,  using MinGW,  on a Linux or BSD box
 #	'MSWIN' = compile for Windows,  using MinGW,  on a Windows machine
 #	'CLANG' = use clang instead of GCC;  BSD/Linux only
 # None of these: compile using g++ on BSD or Linux
 #	Note that I've only tried clang on PC-BSD (which is based on FreeBSD).
+#
+# 'integrat' is not built as part of 'make'.  If you want that,  run
+# 'make integrat' and then,  optionally,  'make install_integrat'.
 
 CC=g++
 LIBSADDED=
@@ -55,11 +59,11 @@ ifdef XCOMPILE
    LIBSADDED=-L $(LIB_DIR) -mwindows
 endif
 
-all: astcheck$(EXE) astephem$(EXE) calendar$(EXE) cgicheck$(EXE)  \
+all: adestest$(EXE) astcheck$(EXE) astephem$(EXE) calendar$(EXE) cgicheck$(EXE)  \
    colors$(EXE) colors2$(EXE) cosptest$(EXE) dist$(EXE) easter$(EXE) \
    get_test$(EXE) htc20b$(EXE) jd$(EXE) \
    jevent$(EXE) jpl2b32$(EXE) jsattest$(EXE) lun_test$(EXE) \
-   marstime$(EXE) oblitest$(EXE) persian$(EXE) phases$(EXE) \
+   marstime$(EXE) mpc2sof$(EXE) oblitest$(EXE) persian$(EXE) phases$(EXE) \
    prectest$(EXE) prectes2$(EXE) ps_1996$(EXE) ssattest$(EXE) tables$(EXE) \
    test_ref$(EXE) testprec$(EXE) uranus1$(EXE) utc_test$(EXE)
 
@@ -79,7 +83,9 @@ install:
 	cp liblunar.a $(LIB_DIR)
 	$(MKDIR) $(HOME)/bin
 	cp astcheck $(HOME)/bin
-	-cp integrat $(HOME)/bin
+
+install_integrat:
+	cp integrat $(HOME)/bin
 
 uninstall:
 	rm -f $(INSTALL_DIR)/include/afuncs.h
@@ -97,33 +103,36 @@ uninstall:
 .cpp.o:
 	$(CC) $(CFLAGS) -c $<
 
-OBJS= alt_az.o astfuncs.o big_vsop.o cgi_func.o classel.o cospar.o  \
-   date.o delta_t.o de_plan.o dist_pa.o eart2000.o elp82dat.o \
+OBJS= alt_az.o ades2mpc.o astfuncs.o big_vsop.o cgi_func.o classel.o   \
+   cospar.o date.o delta_t.o de_plan.o dist_pa.o eart2000.o elp82dat.o \
    eop_prec.o getplane.o get_time.o jsats.o lunar2.o miscell.o  \
-   mpc_code.o mpc_fmt.o nutation.o obliquit.o pluto.o precess.o \
-   showelem.o spline.o ssats.o triton.o vislimit.o vsopson.o
+   mpc_code.o mpc_fmt.o nutation.o obliquit.o pluto.o precess.o showelem.o \
+   snprintf.o sof.o spline.o ssats.o triton.o vislimit.o vsopson.o
 
 liblunar.a: $(OBJS)
 	ar crsv liblunar.a $(OBJS)
 
 clean:
 	$(RM) $(OBJS)
-	$(RM) astcheck.o astephem.o calendar.o cgicheck.o
+	$(RM) adestest.o astcheck.o astephem.o calendar.o cgicheck.o
 	$(RM) cosptest.o get_test.o gust86.o htc20b.o integrat.o jd.o
 	$(RM) jevent.o jpl2b32.o jsattest.o lun_test.o lun_tran.o
 	$(RM) mpcorb.o oblitest.o obliqui2.o persian.o phases.o
 	$(RM) prectes2.o prectest.o ps_1996.o refract.o refract4.o riseset3.o solseqn.o
 	$(RM) ssattest.o tables.o test_ref.o testprec.o uranus1.o utc_test.o
-	$(RM) astcheck$(EXE) astephem$(EXE) calendar$(EXE) cgicheck$(EXE) colors$(EXE)
+	$(RM) adestest$(EXE) astcheck$(EXE) astephem$(EXE) calendar$(EXE) cgicheck$(EXE) colors$(EXE)
 	$(RM) colors2$(EXE) cosptest$(EXE) dist$(EXE) easter$(EXE) get_test$(EXE)
 	$(RM) htc20b$(EXE) integrat$(EXE) jd$(EXE) jevent$(EXE) jpl2b32$(EXE) jsattest$(EXE)
-	$(RM) lun_test$(EXE) marstime$(EXE) oblitest$(EXE) persian$(EXE)
+	$(RM) lun_test$(EXE) marstime$(EXE) mpc2sof$(EXE) oblitest$(EXE) persian$(EXE)
 	$(RM) phases$(EXE) prectest$(EXE) prectes2$(EXE)
 	$(RM) ps_1996$(EXE) relativi$(EXE) solseqn$(EXE) ssattest$(EXE) tables$(EXE)
 	$(RM) test_ref$(EXE) testprec$(EXE) uranus1$(EXE) utc_test$(EXE) liblunar.a
 
-astcheck$(EXE): astcheck.o mpcorb.o liblunar.a
-	$(CC) $(CFLAGS) -o astcheck$(EXE) astcheck.o mpcorb.o liblunar.a $(LIBSADDED)
+adestest$(EXE): adestest.o liblunar.a
+	$(CC) $(CFLAGS) -o adestest$(EXE) adestest.o liblunar.a $(LIBSADDED)
+
+astcheck$(EXE): astcheck.o liblunar.a
+	$(CC) $(CFLAGS) -o astcheck$(EXE) astcheck.o liblunar.a $(LIBSADDED)
 
 astephem$(EXE): astephem.o mpcorb.o liblunar.a
 	$(CC) $(CFLAGS) -o astephem$(EXE) astephem.o mpcorb.o liblunar.a $(LIBSADDED)
@@ -131,8 +140,8 @@ astephem$(EXE): astephem.o mpcorb.o liblunar.a
 calendar$(EXE): calendar.o liblunar.a
 	$(CC) $(CFLAGS) -o calendar$(EXE) calendar.o   liblunar.a $(LIBSADDED)
 
-cgicheck$(EXE): astcheck.cpp mpcorb.o liblunar.a cgicheck.o
-	$(CC) $(CFLAGS) -o cgicheck$(EXE) -DCGI_VERSION cgicheck.o astcheck.cpp mpcorb.o liblunar.a $(LIBSADDED)
+cgicheck$(EXE): astcheck.cpp liblunar.a cgicheck.o
+	$(CC) $(CFLAGS) -o cgicheck$(EXE) -DCGI_VERSION cgicheck.o astcheck.cpp liblunar.a $(LIBSADDED)
 
 colors$(EXE): colors.cpp
 	$(CC) $(CFLAGS) -o colors$(EXE) colors.cpp -DSIMPLE_TEST_PROGRAM
@@ -179,6 +188,12 @@ lun_test$(EXE): lun_test.o lun_tran.o riseset3.o liblunar.a
 marstime$(EXE): marstime.cpp
 	$(CC) $(CFLAGS) -o marstime$(EXE) marstime.cpp -DTEST_PROGRAM $(LIBSADDED)
 
+mpc2sof$(EXE): mpc2sof.cpp
+	$(CC) $(CFLAGS) -o mpc2sof$(EXE) mpc2sof.cpp mpcorb.o liblunar.a $(LIBSADDED)
+
+mpc_code$(EXE): mpc_code.cpp
+	$(CC) $(CFLAGS) -o mpc_code$(EXE) mpc_code.cpp -DTEST_CODE
+
 oblitest$(EXE): oblitest.o obliqui2.o liblunar.a
 	$(CC) $(CFLAGS) -o oblitest$(EXE) oblitest.o obliqui2.o liblunar.a $(LIBSADDED)
 
@@ -199,6 +214,9 @@ ps_1996$(EXE): ps_1996.o liblunar.a
 
 relativi$(EXE): relativi.cpp liblunar.a
 	$(CC) $(CFLAGS) -o relativi$(EXE) -DTEST_CODE relativi.cpp liblunar.a $(LIBSADDED)
+
+sof$(EXE): sof.cpp
+	$(CC) $(CFLAGS) -DTEST_CODE -o sof$(EXE) sof.cpp -lm liblunar.a
 
 spline$(EXE): spline.cpp
 	$(CC) $(CFLAGS) -DTEST_CODE -o spline$(EXE) spline.cpp -lm
