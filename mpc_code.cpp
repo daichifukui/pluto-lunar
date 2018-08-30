@@ -1,8 +1,27 @@
+/* Copyright (C) 2018, Project Pluto
+
+This program is free software; you can redistribute it and/or
+modify it under the terms of the GNU General Public License
+as published by the Free Software Foundation; either version 2
+of the License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program; if not, write to the Free Software
+Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+02110-1301, USA. */
+
 #include <math.h>
 #include <string.h>
 #include <stdlib.h>
 #include <assert.h>
 #include <stdio.h>
+#include <ctype.h>
+#include <time.h>
 #include "watdefs.h"
 #include "mpc_func.h"
 #include "lunar.h"
@@ -33,7 +52,9 @@
       /* Other sizes are from http://adsabs.harvard.edu/abs/2011CeMDA.109..101A */
       /* or http://astropedia.astrogeology.usgs.gov/alfresco/d/d/workspace/SpacesStore/28fd9e81-1964-44d6-a58b-fbbf61e64e15/WGCCRE2009reprint.pdf */
 
-static const double equatorial_radii[15] = {
+#define N_EQUATORIAL_RADII 15
+
+static const double equatorial_radii[N_EQUATORIAL_RADII] = {
       SUN_RADIUS, MERCURY_RADIUS, VENUS_RADIUS, EARTH_MAJOR_AXIS,
       MARS_MAJOR_AXIS, JUPITER_MAJOR_AXIS, SATURN_MAJOR_AXIS,
       URANUS_MAJOR_AXIS, NEPTUNE_MAJOR_AXIS, PLUTO_RADIUS,
@@ -42,8 +63,10 @@ static const double equatorial_radii[15] = {
 
 double planet_radius_in_meters( const int planet_idx)
 {
-   assert( planet_idx >= 0 && planet_idx < 15);
-   return( equatorial_radii[planet_idx]);
+   if( planet_idx >= 0 && planet_idx < N_EQUATORIAL_RADII)
+      return( equatorial_radii[planet_idx]);
+   else
+      return( 0.);
 }
 
 /* NOTE that for the Earth,  I'm using the WGS84 ellipsoid.  The
@@ -84,6 +107,24 @@ int lat_alt_to_parallax( const double lat, const double ht_in_meters,
    *rho_cos_phi = cos( u) + (ht_in_meters / major_axis_in_meters) * cos( lat);
    return( 0);
 }
+
+/* MS only got around to adding cbrt in VS2013 : */
+
+#if (defined( _MSC_VER) && (_MSC_VER < 1800)) || defined( __WATCOMC__)
+
+static double cbrt( const double z)
+{
+   double rval;
+
+   if( z > 0.)
+      rval = pow( z, 1. / 3.);
+   else if( z < 0.)
+      rval = -pow( -z, 1. / 3.);
+   else
+      rval = 0.;
+   return( rval);
+}
+#endif
 
 /* Given an ellipse with semimajor axis a,  semiminor axis b,  centered
 at the origin,  and an arbitrary point (x, y),  point_to_ellipse() will
@@ -155,16 +196,17 @@ double point_to_ellipse( const double a, const double b,
 }
 
 /* You can store locations in 'rovers.txt' in base-60 form,  with the
-lat and longitude smashed together;  e.g.,  19 13' 33.1" would be
+degrees/minutes/seconds smashed together;  e.g.,  19 13' 33.1" would be
 stored as 191333.1.  The following code would take 191331.1 as input
 and return 19 + 13/60 + 33.1/3600 = 19.22586111.   */
 
 static double convert_base_60_to_decimal( const double ival)
 {
-   const int deg = (int)( ival / 10000.);
-   const int min = (int)( fmod( ival / 100., 100.));
-   const double sec = fmod( ival, 100.);
-   const double rval = (double)deg + (double)min / 60. + sec / 3600.;
+   const int secs = (int)ival;
+   const double rval = (double)( secs / 10000)
+                     + (double)((secs / 100) % 100) / 60.
+                     + (double)( secs % 100) / 3600.
+                     + (ival - (double)secs) / 3600.;
 
    return( rval);
 }
@@ -173,12 +215,10 @@ int get_mpc_code_info( mpc_code_t *cinfo, const char *buff)
 {
    int i = 0, rval = -1;
 
-   while( buff[i] > ' ' && buff[i] <= '~')
+   while( buff[i] > ' ' && buff[i] <= '~' && buff[i] != '!')
       i++;
-
-   cinfo->lat = cinfo->lon = cinfo->alt
-                  = cinfo->rho_sin_phi = cinfo->rho_cos_phi = 0.;
-   if( i == 3 && strlen( buff) > 33 && buff[3] == ' ')
+   memset( cinfo, 0, sizeof( mpc_code_t));
+   if( i >= 3 && i <= 4 && strlen( buff) >= 30)
       {
       rval = 3;         /* assume earth */
 
@@ -191,7 +231,7 @@ int get_mpc_code_info( mpc_code_t *cinfo, const char *buff)
             rval = -1;
          else
             {
-            const char *tptr = strchr( buff, '@');
+            const char *tptr = strchr( buff + 4, '@');
 
             if( fabs( cinfo->lon) > 361. || fabs( cinfo->lat) > 91.)
                {
@@ -215,26 +255,31 @@ int get_mpc_code_info( mpc_code_t *cinfo, const char *buff)
                }
             }
          }
-      else if( buff[7] == '.' && (buff[21] == '+' || buff[21] == '-')
-               && buff[14] == '.' && buff[23] == '.')
+      else if( buff[7] == '.' && strchr( "+- ", buff[21])
+               && buff[14] == '.' && buff[23] == '.' && buff[3] == ' ')
          {                 /* 'standard' MPC format */
-         if( sscanf( buff + 3, "%lf%lf%lf", &cinfo->lon,
-                  &cinfo->rho_cos_phi, &cinfo->rho_sin_phi) != 3)
-            rval = -1;
-         else
-            {
-            cinfo->name = buff + 30;
-            cinfo->format = MPC_CODE_PARALLAXES;
-            cinfo->lon *= PI / 180.;
+         cinfo->lon = atof( buff + 4);
+         cinfo->rho_cos_phi = atof( buff + 13);
+         cinfo->rho_sin_phi = atof( buff + 21);
+         cinfo->name = buff + 30;
+         cinfo->format = MPC_CODE_PARALLAXES;
+         cinfo->lon *= PI / 180.;
+         if( cinfo->rho_cos_phi || cinfo->rho_sin_phi)
             cinfo->lat = point_to_ellipse( 1., EARTH_MINOR_AXIS / EARTH_MAJOR_AXIS,
-                    cinfo->rho_cos_phi, cinfo->rho_sin_phi, &cinfo->alt);
-            cinfo->alt *= EARTH_MAJOR_AXIS;
-            }
+                 cinfo->rho_cos_phi, cinfo->rho_sin_phi, &cinfo->alt);
+         else
+            cinfo->lat = cinfo->alt = 0.;
+         cinfo->alt *= EARTH_MAJOR_AXIS;
+         while( cinfo->prec1 < 5 && isdigit( buff[8 + cinfo->prec1]))
+            cinfo->prec1++;      /* longitude precision,  in digits */
+         while( cinfo->prec2 < 5 && isdigit( buff[15 + cinfo->prec2]))
+            cinfo->prec2++;      /* parallax precision,  in digits */
          }
       else if( i == 30)
          {
          cinfo->name = buff + 30;
          cinfo->format = MPC_CODE_SATELLITE;
+         rval = -2;
          }
       else
          rval = -1;
@@ -242,8 +287,11 @@ int get_mpc_code_info( mpc_code_t *cinfo, const char *buff)
    if( rval != -1)
       {
       cinfo->planet = rval;
-      memcpy( cinfo->code, buff, 3);
-      cinfo->code[3] = '\0';
+      memcpy( cinfo->code, buff, 4);
+      if( buff[3] == ' ')        /* standard 3-character code */
+         cinfo->code[3] = '\0';
+      else                       /* 'extended' 4-character code */
+         cinfo->code[4] = '\0';
       if( cinfo->lon < 0.)
          cinfo->lon += PI + PI;
       }
@@ -252,14 +300,68 @@ int get_mpc_code_info( mpc_code_t *cinfo, const char *buff)
 
 #ifdef TEST_CODE
 
+static bool extract_region_data_for_mpc_station( char *buff,
+            const double lat, const double lon)
+{
+   FILE *ifile = fopen( "geo_rect.txt", "rb");
+   const double lat_in_degrees = (180. / PI) * lat;
+   const double lon_in_degrees = (180. / PI) * lon;
+
+   *buff = '\0';
+   if( ifile)
+      {
+      char tbuff[90];
+      size_t i = 0;
+
+      while( !*buff && fgets( tbuff, sizeof( tbuff), ifile))
+         if( *tbuff != '#')
+            {
+            double d_lon1 = atof( tbuff)      - lon_in_degrees;
+            double d_lon2 = atof( tbuff + 20) - lon_in_degrees;
+            const double d_lat1 = atof( tbuff + 10) - lat_in_degrees;
+            const double d_lat2 = atof( tbuff + 30) - lat_in_degrees;
+
+            while( d_lon1 > 180.)
+               d_lon1 -= 360.;
+            while( d_lon1 < -180.)
+               d_lon1 += 360.;
+            while( d_lon2 - d_lon1 > 180.)
+               d_lon2 -= 360.;
+            while( d_lon2 - d_lon1 < -180.)
+               d_lon2 += 360.;
+            if( d_lon1 * d_lon2 < 0. && d_lat1 * d_lat2 < 0.)
+               {
+               strcpy( buff, tbuff + 40);
+               while( buff[i] >= ' ')
+                  i++;
+               buff[i] = '\0';   /* remove trailing CR/LF */
+               }
+            }
+      fclose( ifile);
+      }
+   return( *buff ? true : false);
+}
+
+const char *html_header_text =
+    "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.0//EN\">\n"
+    "<HTML>\n"
+    "<HEAD>\n"
+    "   <TITLE> MPC station sites</TITLE>\n"
+    "   <META http-equiv=Content-Type content=\"text/html; charset=utf-8\">\n"
+    "</HEAD>\n"
+    "<BODY> <pre>\n";
+
 int main( const int argc, const char **argv)
 {
-   FILE *ifile = fopen( (argc == 1 ? "ObsCodes.htm" : argv[1]), "rb");
+   FILE *ifile = fopen( (argc < 2 ? "ObsCodes.htm" : argv[1]), "rb");
    char buff[200];
    mpc_code_t code;
+   bool google_map_links = false, dump_comments = false;
+   int i;
+   size_t google_offset = 0;
 
    const char *header =
-            "Cod Longitude  Latitude     Altitude rho_cos   rho_sin_phi";
+            "Pl Code Longitude  Latitude     Altitude rho_cos   rho_sin_phi  region";
 
    if( !ifile)
       ifile = fopen( "ObsCodes.html", "rb");
@@ -268,14 +370,80 @@ int main( const int argc, const char **argv)
       printf( "ObsCodes not opened\n");
       return( -1);
       }
-   printf( "%s\n", header);
+   for( i = 1; i < argc; i++)
+      if( argv[i][0] == '-')
+         switch( argv[i][1])
+            {
+            case 'v':
+               dump_comments = true;
+               break;
+            case 'g':
+               {
+               const time_t t0 = time( NULL);
+
+               google_map_links = true;
+               google_offset = 3;
+               printf( "%s", html_header_text);
+               printf( "Created %s\n", ctime( &t0));
+               }
+               break;
+            default:
+               printf( "Command line option '%s' unrecognized\n", argv[i]);
+               return( -1);
+            }
+   printf( "%s\n", header + google_offset);
+   i = 0;
    while( fgets( buff, sizeof( buff), ifile))
-      if( get_mpc_code_info( &code, buff) >= 0)
-         printf( "%s %10.6f %+10.6f %10.3f %9.7f %+10.7f %s",
-                  code.code, code.lon * 180. / PI, code.lat * 180. / PI,
-                  code.alt, code.rho_cos_phi, code.rho_sin_phi, code.name);
-   printf( "%s\n", header);
+      if( get_mpc_code_info( &code, buff) != -1)
+         {
+         char region[100], obuff[200];
+         bool show_link_for_this_line;
+
+         if( code.planet == 3)
+            extract_region_data_for_mpc_station( region, code.lat, code.lon);
+         else
+            *region = '\0';
+         code.lat *= 180. / PI;
+         code.lon *= 180. / PI;
+#ifdef BITS_32
+         sprintf( obuff,
+#else
+         snprintf( obuff, sizeof( obuff),
+#endif
+                 "%2d %-4s %10.6f %+10.6f %10.3f %9.7f %+10.7f %-15.15s ",
+                  code.planet,
+                  code.code, code.lon, code.lat,
+                  code.alt, code.rho_cos_phi, code.rho_sin_phi,
+                  region);
+         if( code.prec1)         /* long. precision: blank unused digits */
+            memset( obuff + 12 + code.prec1, ' ', 6 - code.prec1);
+         if( code.prec2)         /* parallax data prec: blank unused */
+            {
+            memset( obuff + 43 + code.prec2, ' ', 7 - code.prec2);
+            memset( obuff + 54 + code.prec2, ' ', 7 - code.prec2);
+            }
+         if( code.lon > 180.)
+            code.lon -= 360.;
+         if( google_map_links)        /* include HTML anchors */
+            printf( "<a name=\"L%04d\"></a>", i++);
+         show_link_for_this_line = (code.planet == 3 && google_map_links
+                        && (code.lat || code.lon));
+         if( show_link_for_this_line)
+            {
+            printf( "<a name=\"%s\"></a>", code.code);
+            printf( "<a href=\"http://maps.google.com/maps?q=%f,%f\">",
+                        code.lat, code.lon);
+            }
+         printf( "%s %s", obuff + google_offset, code.name);
+         if( show_link_for_this_line)
+            printf( "</a>");
+         }
+      else if( dump_comments)    /* dump everything,  including */
+         printf( "%s", buff);    /* comments from input file */
    fclose( ifile);
+   printf( "%s\n", header + google_offset);
+   if( google_map_links)
+      printf( "</pre></body></html>\n");
    return( 0);
 }
 #endif
