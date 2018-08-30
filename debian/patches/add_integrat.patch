@@ -1,13 +1,13 @@
-Index: pluto-lunar-0.0~git20180227/makefile
+Index: pluto-lunar/makefile
 ===================================================================
---- pluto-lunar-0.0~git20180227.orig/makefile
-+++ pluto-lunar-0.0~git20180227/makefile
-@@ -57,7 +57,7 @@ endif
+--- pluto-lunar.orig/makefile
++++ pluto-lunar/makefile
+@@ -61,7 +61,7 @@ endif
  
- all: astcheck$(EXE) astephem$(EXE) calendar$(EXE) cgicheck$(EXE)  \
+ all: adestest$(EXE) astcheck$(EXE) astephem$(EXE) calendar$(EXE) cgicheck$(EXE)  \
     colors$(EXE) colors2$(EXE) cosptest$(EXE) dist$(EXE) easter$(EXE) \
 -   get_test$(EXE) htc20b$(EXE) jd$(EXE) \
 +   get_test$(EXE) htc20b$(EXE) integrat$(EXE) jd$(EXE) \
     jevent$(EXE) jpl2b32$(EXE) jsattest$(EXE) lun_test$(EXE) \
-    marstime$(EXE) oblitest$(EXE) persian$(EXE) phases$(EXE) \
+    marstime$(EXE) mpc2sof$(EXE) oblitest$(EXE) persian$(EXE) phases$(EXE) \
     prectest$(EXE) prectes2$(EXE) ps_1996$(EXE) ssattest$(EXE) tables$(EXE) \
