@@ -47,6 +47,9 @@ compute_limiting_mag( ) function.
 
 All of what follows is adapted from Brad Schaefer's article and code
 on pages 57-60,  May 1998 _Sky & Telescope_,  "To the Visual Limits",
+
+https://archive.org/stream/Sky_and_Telescope_1998-05-pdf/#page/n109/mode/2up
+
 which is in turn based on his articles in _Publications of the Astronomical
 Society of the Pacific_ :
 
@@ -62,7 +65,34 @@ At some point when I have the time,  I'll break out the main( ) portion,
 tack in the code for CCD mag limits on page 121 of the same magazine,
 and make proper header files.
 
-*/
+'Brightness',  by the way,  is in mystery units.  But line 260 of
+'vislimit.cpp' divides the brightnesses by 1.11e-15 to get nanoLamberts.
+One could (and in the example test code,  I do) divide by 1.11e-6 to
+get lamberts.
+
+Then,  the relation between sky brightness in nanoLamberts (B) and in
+magnitudes/arcsec^2 is given in the second PASP paper above as
+equation (1)
+
+B = 34.08 exp( 20.7233 - 0.92104V)
+
+   Some rearrangement gets you the inverse formula
+
+V = 3.8312 - 2.5 * log10( B)
+
+   which provides the required conversion from brightness in
+lamberts (which I've never seen an astronomer use) to brightness in
+magnitudes/arcsec^2 (which is used frequently).  If instead we
+have a brightness Bm = B * 1.11e-6 "mystery units",
+
+V = 3.8312 - 2.5 * log10( Bm / 1.11e-6)
+  = -2.5 * log10( Bm) - 11.055
+
+See the 'test program' below for example usage. */
+
+#ifdef TEST_STATEMENTS
+#include <stdio.h>
+#endif
 
 #include <math.h>
 #include "vislimit.h"
@@ -112,7 +142,9 @@ int DLL_FUNC set_brightness_params( BRIGHTNESS_DATA *b)
    const double k_water_coeff = .94 * (b->relative_humidity / 100.) *
                        exp( b->temperature_in_c / 15.) *
                        exp( -b->ht_above_sea_in_meters / 8200.);
-   const double moon_elong = b->moon_elongation * 180. / PI;
+              /* 'moon_angle' = distance of moon from opposition,  in     */
+              /* degrees.  It's near 0 degrees at full moon,  180 at new. */
+   double moon_angle = 180. - b->moon_elongation * 180. / PI;
    double k_aerosol_coeff = .1 * exp( -b->ht_above_sea_in_meters / 1500.);
    int i;
 
@@ -126,10 +158,9 @@ int DLL_FUNC set_brightness_params( BRIGHTNESS_DATA *b)
          humidity_param = 1. - .32 / log( b->relative_humidity / 100.);
       k_aerosol_coeff *= exp( 1.33 * log( humidity_param));
       }
-   if( b->latitude < 0.)
-      k_aerosol_coeff *= 1. - sin( month_angle);
-   else
-      k_aerosol_coeff *= 1. + sin( month_angle);
+         /* Following line modified by BJG to avoid a discontinuity when */
+         /* crossing the equator.  Aerosols tend to increase in summer. */
+   k_aerosol_coeff *= 1. + sin( month_angle) * sin( b->latitude);
 
    b->year_term = 1. + .3 * cos( 2. * PI * (b->year - 1992) / 11.);
          /* accounts for a 30% variation due to sunspots over 11-yr cycle? */
@@ -137,8 +168,11 @@ int DLL_FUNC set_brightness_params( BRIGHTNESS_DATA *b)
          /* assume accuracy deteriorates for years far from 1992.          */
    b->air_mass_moon = compute_air_mass( b->zenith_ang_moon);
    b->air_mass_sun  = compute_air_mass( b->zenith_ang_sun);
-   b->lunar_mag = -12.73 + moon_elong * (.026 +
-                           4.e-9 * (moon_elong * moon_elong * moon_elong));
+   moon_angle = fabs( fmod( moon_angle, 360.));
+   if( moon_angle > 180.)
+      moon_angle = 360. - moon_angle;
+   b->lunar_mag = -12.73 + moon_angle * (.026 +
+                           4.e-9 * (moon_angle * moon_angle * moon_angle));
                /* line 2180 in B Schaefer code */
    for( i = 0; i < 5; i++)
       {
@@ -268,8 +302,7 @@ int DLL_FUNC compute_sky_brightness( BRIGHTNESS_DATA *b)
          b->brightness[i] = bn + brightness_moon +
                      min( brightness_daylight, twilight_brightness);
 #ifdef TEST_STATEMENTS
-         if( i == 0)
-            printf( "Brightnesses: %lg %lg %lg %lg\n", bn,
+         printf( "Brightnesses (%d): base %lg  moon %lg   twil %lg   sun %lg\n", i, bn,
                   brightness_moon, twilight_brightness, brightness_daylight);
 #endif
          }
@@ -284,6 +317,7 @@ int main( const int argc, const char **argv)
 {
    BRIGHTNESS_DATA b;
    int i;
+   const char *band_name = "UBVRI";
 
    b.zenith_ang_moon = 40. * PI / 180.;
    b.zenith_ang_sun = 105. * PI / 180.;
@@ -304,6 +338,12 @@ int main( const int argc, const char **argv)
       if( argv[i][0] == '-')
          switch( argv[i][1])
             {
+            case 'a':
+               b.ht_above_sea_in_meters = atof( argv[i] + 2);
+               break;
+            case 'd':
+               b.dist_moon = atof( argv[i] + 2) * PI / 180.;
+               break;
             case 'e':
                b.moon_elongation = atof( argv[i] + 2) * PI / 180.;
                break;
@@ -313,6 +353,12 @@ int main( const int argc, const char **argv)
             case 'l':
                b.zenith_ang_moon = (90. - atof( argv[i] + 2)) * PI / 180.;
                break;
+            case 'h':
+               b.relative_humidity = atof( argv[i] + 2);
+               break;
+            case 't':
+               b.temperature_in_c = atof( argv[i] + 2);
+               break;
             default:
                printf( "Option '%s' not recognized\n", argv[i]);
                break;
@@ -321,8 +367,15 @@ int main( const int argc, const char **argv)
    set_brightness_params( &b);
    compute_sky_brightness( &b);
    compute_extinction( &b);
+   printf( "Band  k  mag/arcsec^2 Ext\n");
    for( i = 0; i < 5; i++)
-      printf( "%lf  %lg  %.5lf\n", b.k[i], b.brightness[i], b.extinction[i]);
+      {
+      const double brightness_in_mags_per_sq_arcsec =
+                   -2.5 * log10( b.brightness[i]) - 11.055;
+
+      printf( "%c : %6.3f %6.2f %6.3lf\n", band_name[i], b.k[i],
+                  brightness_in_mags_per_sq_arcsec, b.extinction[i]);
+      }
    printf( "Limiting magnitude: %.5lf\n", compute_limiting_mag( &b));
    return( 0);
 }

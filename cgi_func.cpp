@@ -17,7 +17,10 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
 
 #include <stdio.h>
 #include <string.h>
+#include <assert.h>
+#include <stdlib.h>
 #include "cgi_func.h"
+#include "watdefs.h"
 
 /* Server-based versions of Find_Orb,  sat_id,  and astcheck (see
 'fo_serve.cpp',  'sat_id2.cpp',  cgicheck.cpp' respectively) all use
@@ -40,7 +43,6 @@ different for each program;  at present,  you get the Find_Orb message.)
 #include <sys/time.h>         /* these allow resource limiting */
 #include <sys/resource.h>
 #include <unistd.h>
-#include <stdlib.h>
 #include <signal.h>
 
 static const char *email_address_mangled_for_no_spam =
@@ -54,6 +56,7 @@ static void sighandler( int signum, siginfo_t *info, void *unused_ucontext)
 
 static void sighandler( int signum, siginfo_t *info, void *unused_ucontext)
 {
+   INTENTIONALLY_UNUSED_PARAMETER( unused_ucontext);
    if( signum == SIGXCPU)
       {
       printf( "\n\n<h1> Ran out of time </h1>\n");
@@ -98,6 +101,7 @@ void avoid_runaway_process( const int max_time_to_run)
 
 void avoid_runaway_process( const int max_time_to_run)
 {
+   INTENTIONALLY_UNUSED_PARAMETER( max_time_to_run);
 }
 #endif         /* _WIN32 */
 
@@ -131,6 +135,8 @@ static int get_urlencoded_piece( const char **idata,
          }
       *buff++ = (char)c;
       }
+   if( c != end_char)
+      tptr--;
    *buff =  '\0';
    *idata = tptr;
    return( c);
@@ -148,6 +154,8 @@ int get_urlencoded_form_data( const char **idata,
    return( c != '&' && c > 13);
 }
 
+#define OVERRUN         -3
+
 int get_multipart_form_data( const char *boundary, char *field,
                 char *buff, char *filename, const size_t max_len)
 {
@@ -164,6 +172,8 @@ int get_multipart_form_data( const char *boundary, char *field,
       {
       char *filename_ptr = strstr( tptr, "filename=\"");
 
+      if( strlen( buff) == max_len - 1)
+         return( OVERRUN);
       *endptr = '\0';
       strcpy( field, tptr + 6);
       if( filename && filename_ptr
@@ -174,6 +184,8 @@ int get_multipart_form_data( const char *boundary, char *field,
          }
       if( fgets( buff, (int)max_len, stdin))
          {
+         if( strlen( buff) == max_len - 1)
+            return( OVERRUN);
          while( bytes_read < max_len - 1 &&
                  fgets( buff + bytes_read, (int)( max_len - bytes_read), stdin)
                  && memcmp( buff + bytes_read, boundary, blen))
@@ -187,4 +199,111 @@ int get_multipart_form_data( const char *boundary, char *field,
       bytes_read--;
    buff[bytes_read] = '\0';
    return( (int)bytes_read);
+}
+
+/* Overall,  we have three situations :
+
+   (1) If the QUERY_STRING environment variable is set,  our data
+comes from the URL (i.e.,  METHOD=GET).  We can parse the
+QUERY_STRING data with get_urlencoded_form_data() (q.v.).
+
+   (2) Otherwise,  we look at the CONTENT_TYPE environment variable.
+If it's
+
+CONTENT_TYPE=application/x-www-form-urlencoded
+
+   we can just read in a line from stdin and parse that,  just as
+if it had been the QUERY_STRING variable.  Other than the source of
+the text coming from stdin instead of an environment variable,  it's
+exactly the same procedure.
+
+   (3) If,  instead,  the CONTENT_TYPE variable looks like
+
+CONTENT_TYPE=multipart/form-data; boundary=--------...more_text_here
+
+   then we have to use the get_multipart_form_data( ) function above.
+
+   (4) If it's none of these,  something else is going on and this
+code (at present) doesn't know what to do about it. */
+
+static char *url_string = NULL;
+static const char *url_pointer = NULL;
+static char *ibuff = NULL, *boundary = NULL;
+static int method, ilen;
+
+#define METHOD_GET               1
+#define METHOD_PUT_URL           2
+#define METHOD_PUT_MULTIPART     3
+
+int initialize_cgi_reading( void)
+{
+   method = 0;
+   url_string = getenv( "QUERY_STRING");
+   if( url_string && *url_string)      /* METHOD=GET */
+      {
+      url_pointer = url_string;
+      method = METHOD_GET;
+      }
+   else
+      {
+      const char *eptr = getenv( "CONTENT_TYPE");
+
+      if( !eptr)
+         return( -1);
+      if( !memcmp( eptr, "application/x-www-form-urlencoded", 33))
+         method = METHOD_PUT_URL;
+      else if( !memcmp( eptr, "multipart/form-data;", 20))
+         method = METHOD_PUT_MULTIPART;
+      else
+         return( -2);
+      eptr = getenv( "CONTENT_LENGTH");
+      assert( eptr);
+      ilen = atoi( eptr);
+      assert( ilen);
+      ibuff = (char *)malloc( ilen + 1);
+      if( !fgets( ibuff, ilen + 1, stdin))
+         return( -3);
+      if( method == METHOD_PUT_URL)
+         url_pointer = ibuff;
+      else           /* must be multipart */
+         {
+         boundary = (char *)malloc( strlen( ibuff) + 1);
+         strcpy( boundary, ibuff);
+         }
+      }
+   return( method);
+}
+
+int get_cgi_data( char *field, char *data, char *filename, const size_t max_data)
+{
+   int rval;
+   const size_t max_field = 30;
+
+   switch( method)
+      {
+      case METHOD_GET:
+      case METHOD_PUT_URL:
+         if( filename)
+            *filename = '\0';
+         rval = get_urlencoded_form_data( &url_pointer, field, max_field,
+                                 data, max_data);
+
+         break;
+      case METHOD_PUT_MULTIPART:
+         rval = get_multipart_form_data( boundary, field, data,
+                                          filename, max_data);
+         if( rval > 0)
+            rval = 0;
+         break;
+      default:
+         rval = -1;
+         break;
+      }
+   return( rval);
+}
+
+void free_cgi_data( void)
+{
+   if( ibuff)
+      free( ibuff);
 }

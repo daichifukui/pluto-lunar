@@ -50,6 +50,23 @@ int DLL_FUNC comet_posn( ELEMENTS DLLPTR *elem, double t, double DLLPTR *loc);  
 void DLL_FUNC derive_quantities( ELEMENTS DLLPTR *e, const double gm);
 int DLL_FUNC setup_elems_from_ast_file( ELEMENTS DLLPTR *class_elem,
               const uint32_t DLLPTR *elem, const double t_epoch);
+double DLL_FUNC phase_angle_correction_to_magnitude( const double phase_angle,
+                                 const double slope_param);
+int setup_planet_elem( ELEMENTS *elem, const int planet_idx,
+                                             const double t_cen);
+int extract_sof_data( ELEMENTS *elem, const char *buff, const char *header);
+int extract_sof_data_ex( ELEMENTS *elem, const char *buff, const char *header,
+                        double *extra_info);                /* sof.cpp */
+double extract_yyyymmdd_to_jd( const char *buff);           /* sof.cpp */
+
+typedef struct
+{
+   double obj1_true_anom, jd1;       /* these are set in find_moid_full */
+   double obj2_true_anom, jd2;       /* NOT SET YET */
+   double barbee_speed;              /* in AU/day */
+} moid_data_t;
+
+double DLL_FUNC find_moid_full( const ELEMENTS *elem1, const ELEMENTS *elem2, moid_data_t *mdata);
 
 #ifdef __cplusplus
 }

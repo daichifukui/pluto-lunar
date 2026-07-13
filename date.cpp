@@ -20,8 +20,10 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
 #include <string.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <limits.h>
 #include <assert.h>
 #include "watdefs.h"
+#include "get_bin.h"
 #include "date.h"
 
 /* General calendrical comments:
@@ -246,7 +248,15 @@ significance outside of this particular function... but it _does_ let us
 write simpler code that won't get wrong answers for large or negative
 numbers of lunations.  Let's call 25920 lunations a "glumph."  We figure
 out how many glumphs have passed and our location within that glumph,
-and the rest is easy. */
+and the rest is easy.
+
+   As a side effect of all this : since there are 235 lunations
+every 19 years,  and 765433 halakim per lunation,  there are exactly
+179876755 halakim every 19 years,  or 179876755/(1080*24) days =
+35975351/(216*24) days.  Thus,  35975351 days are exactly 19*216*24
+= 98496 years;  that is to say,  the Hebrew calendar repeats itself
+exactly every 98496 years.  Put another way,  the average length of
+a year is exactly 35975351/98496 = 365.24682220598... days.  */
 
 static void lunations_to_days_and_halakim( const long lunations, long *days,
                long *halakim)
@@ -489,7 +499,7 @@ static long persian_modern_jd0( const long year)
 {
    const long persian_epoch = 1948320L;
    const long epbase = year - 474L;
-   const long epyear = 474L + (epbase + 282000000) % 2820L;
+   const long epyear = 474L + mod( epbase, 2820L);
 
    return( (epyear * 31 - 5) / 128 + (epyear - 1) * 365
                + ((year - epyear) / 2820) * 1029983 + persian_epoch);
@@ -508,13 +518,13 @@ static void get_jalali_year_data( const long year, long *days,
       is_modern = 1;
    if( is_modern)
       {
-      days[0] = persian_modern_jd0( (int)year) + 1L;
-      days[1] = persian_modern_jd0( (int)year + 1) + 1L;
+      days[0] = persian_modern_jd0( year) + 1L;
+      days[1] = persian_modern_jd0( year + 1L) + 1L;
       }
    else
       {
-      days[0] = jalali_jd0( (int)year) + 1L;
-      days[1] = jalali_jd0( (int)year + 1) + 1L;
+      days[0] = jalali_jd0( year) + 1L;
+      days[1] = jalali_jd0( year + 1L) + 1L;
       }
             /* The first six months have 31 days.  The next five have 30  */
             /* days.  The last month has 29 days in ordinary years,  30   */
@@ -572,7 +582,17 @@ jd = 365 * year + year / 4 + CHINESE_CALENDAR_EPOCH + offset
 
 Thus,  the offset can be a value from 0 to (2^11 / 14) = 186. */
 
-static char *chinese_calendar_data = NULL;
+#ifdef LOAD_CHINESE_CALENDAR_DATA_FROM_FILE
+static const unsigned char *chinese_calendar_data = NULL;
+
+void DLL_FUNC set_chinese_calendar_data( const void *cdata)
+{
+   chinese_calendar_data = (const unsigned char *)cdata;
+}
+#else
+   #include "chinese.h"
+#endif    /* #ifdef LOAD_CHINESE_CALENDAR_DATA_FROM_FILE */
+
 static int chinese_intercalary_month = 0;
 
 #define CHINESE_CALENDAR_EPOCH 757862L
@@ -580,19 +600,22 @@ static int chinese_intercalary_month = 0;
 static int get_chinese_year_data( const long year, long *days,
                                    char *month_data)
 {
-   int32_t packed_val = 0;
+   int32_t packed_val;
+   char tbuff[4];
 
+#ifdef LOAD_CHINESE_CALENDAR_DATA_FROM_FILE
    if( !chinese_calendar_data)
       return( -1);
+#endif
 
-   int index = (int)year - *(int16_t *)( chinese_calendar_data + 2);
-   int n_years = *(const int16_t *)chinese_calendar_data;
-         /* Above lines should involve byte-swapping */
+   int index = (int)year - get16sbits( chinese_calendar_data + 2);
+   const int n_years = get16sbits( chinese_calendar_data);
 
    if( index < 0 || index >= n_years)
       return( -2);
-   memcpy( &packed_val, chinese_calendar_data + 4 + 3 * index, 3);
-         /* Swap 'packed_val' on non-Intel byte order machines */
+   memcpy( tbuff, chinese_calendar_data + 4 + 3 * index, 3);
+   tbuff[3] = 0;
+   packed_val = get32sbits( tbuff);
    for( int i = 0; i < 13; i++)
       month_data[i] = (char)(((packed_val >> i) & 1L) ? 30 : 29);
    chinese_intercalary_month = (int)( (packed_val >> 13) % 14L);
@@ -654,15 +677,12 @@ static int get_calendar_data( const long year, long *days, char *month_data,
    return( rval);
 }
 
-void DLL_FUNC set_chinese_calendar_data( void *cdata)
-{
-   chinese_calendar_data = (char *)cdata;
-}
-
 int DLL_FUNC get_chinese_intercalary_month( void)
 {
    return( chinese_intercalary_month);
 }
+
+#define RETURN_DAYS_IN_MONTH    -999
 
 /* dmy_to_day( ) just gets calendar data for the current year,  including
 the JD of New Years Day for that year.  After that,  all it has to do is
@@ -689,6 +709,8 @@ long DLL_FUNC dmy_to_day( const int day, const int month, const long year,
    rval = get_calendar_data( year, year_ends, mdata, calendar_to_use);
    if( !rval)
       {
+      if( day == RETURN_DAYS_IN_MONTH)
+         return( mdata[month - 1]);
       jd = year_ends[0];
       for( int i = 0; i < month - 1; i++)
          jd += mdata[i];
@@ -697,6 +719,97 @@ long DLL_FUNC dmy_to_day( const int day, const int month, const long year,
    else
       jd = 0;
    return( jd);
+}
+
+int DLL_FUNC days_in_month( const int month, const long year,
+                            const int calendar)
+{
+   return( dmy_to_day( RETURN_DAYS_IN_MONTH, month, year, calendar));
+}
+
+/* This usually gets you the correct year for a given JD,  but is
+sometimes off by one around the New Year of the calendar in question.
+Which is why the subsequent day_to_dmy( ) function sometimes finds it
+has to move ahead or back up by one year.
+
+   The French Revolutionary and both Persian calendars have (over the
+long range) years of 365 + 683/2820 days;  i.e.,  2820 years have
+2820 * 365 + 683 days.  The other calendars have similar long-range
+exact recurrences in which n1 years will have n2 days.  The exact
+recurrences for the Persian,  Jalali,  Hebrew,  and French calendars
+would overflow 32-bit arithmetic,  so "almost" recurrences are used
+if longs aren't 64 bits.  The error would become noticeable after
+about a billion years,  but on 32-bit systems,  we're limited to
++/- 2^31 days = about 5.8 million years anyway.     */
+
+/* #define LONGS_ARE_64_BITS */
+
+static long approx_year( long jd, const int calendar)
+{
+   long year, n1 = 0, n2 = 0, calendar_epoch, day_in_cycle;
+
+   switch( calendar)
+      {
+      case CALENDAR_GREGORIAN:
+         calendar_epoch = JUL_GREG_CALENDAR_EPOCH;
+         n1 = 400;               /* 400 Gregorian years contain 400 */
+         n2 = 400 * 365 + 97;    /* 'normal' years plus 97 leap days */
+         break;
+      case CALENDAR_JULIAN:
+         calendar_epoch = JUL_GREG_CALENDAR_EPOCH - 2;
+         n1 = 4;                 /* The Julian calendar just repeats */
+         n2 = 365 * 4 + 1;       /* every four years */
+         break;
+      case CALENDAR_HEBREW:
+         calendar_epoch = HEBREW_CALENDAR_EPOCH - 235;
+#ifdef LONGS_ARE_64_BITS
+         n1 = 98496;          /* exact values which overflow on 32 bits */
+         n2 = 35975351;       /*                                        */
+#else
+         n1 = 944;
+         n2 = 344793;
+#endif
+         break;
+      case CALENDAR_ISLAMIC:
+         calendar_epoch = ISLAMIC_CALENDAR_EPOCH - 1;
+         n1 = 30;             /* 30 Islamic years = 10631 days,  exactly */
+         n2 = 10631;
+         break;
+      case CALENDAR_REVOLUTIONARY:
+         calendar_epoch = REVOLUTIONARY_CALENDAR_EPOCH - 1;
+#ifdef LONGS_ARE_64_BITS
+         n1 = 2820;           /* exact values which overflow on 32 bits */
+         n2 = 2820 * 365 + 683;
+#else
+         n1 = 2147;
+         n2 = 784175;
+#endif
+         break;
+      case CALENDAR_PERSIAN:
+      case CALENDAR_MODERN_PERSIAN:
+         calendar_epoch = JALALI_ZERO + 1;
+#ifdef LONGS_ARE_64_BITS
+         n1 = 2820;           /* exact values which overflow on 32 bits */
+         n2 = 2820 * 365 + 683;
+#else
+         n1 = 2147;
+         n2 = 784175;
+#endif
+         break;
+      case CALENDAR_CHINESE:
+         calendar_epoch = CHINESE_CALENDAR_EPOCH + 90;
+         n1 = 128;
+         n2 = 46751;
+         break;
+      default:       /* undefined calendar */
+         assert( 1);
+         return( -1);
+      }
+   jd -= calendar_epoch;
+   day_in_cycle = mod( jd, n2);
+   year = n1 * (( jd - day_in_cycle) / n2);
+   year += day_in_cycle * n1 / n2;
+   return( year);
 }
 
 /* day_to_dmy( ) first estimates the year corresponding to an input JD,
@@ -712,42 +825,16 @@ void DLL_FUNC day_to_dmy( const long jd, int DLLPTR *day,
    long year_ends[2];
    long curr_jd;
    char month_data[N_MONTHS];
+   int calendar_to_use = calendar;
 
+   if( calendar == CALENDAR_JULIAN_GREGORIAN)
+      calendar_to_use =
+          ((jd > GREGORIAN_SWITCHOVER_JD) ? CALENDAR_GREGORIAN : CALENDAR_JULIAN);
+
+   *year = approx_year( jd, calendar_to_use);
    *day = -1;           /* to signal an error */
-   switch( calendar)
-      {
-      case CALENDAR_GREGORIAN:
-      case CALENDAR_JULIAN:
-      case CALENDAR_JULIAN_GREGORIAN:
-         *year = (jd - JUL_GREG_CALENDAR_EPOCH) / 365;
-         break;
-      case CALENDAR_HEBREW:
-         *year = (jd - HEBREW_CALENDAR_EPOCH) / 365L;
-         break;
-      case CALENDAR_ISLAMIC:
-         *year = (jd - ISLAMIC_CALENDAR_EPOCH) / 354L;
-         break;
-      case CALENDAR_REVOLUTIONARY:
-         *year = (jd - REVOLUTIONARY_CALENDAR_EPOCH) / 365L;
-         break;
-      case CALENDAR_PERSIAN:
-      case CALENDAR_MODERN_PERSIAN:
-         *year = (jd - JALALI_ZERO) / 365L;
-         break;
-      case CALENDAR_CHINESE:
-         *year = (jd - CHINESE_CALENDAR_EPOCH) / 365L;
-         break;
-      default:       /* undefined calendar */
-         return;
-      }
-
    do
       {
-      int calendar_to_use = calendar;
-
-      if( calendar == CALENDAR_JULIAN_GREGORIAN)
-         calendar_to_use =
-          ((jd > GREGORIAN_SWITCHOVER_JD) ? CALENDAR_GREGORIAN : CALENDAR_JULIAN);
       if( get_calendar_data( *year, year_ends, month_data, calendar_to_use))
          return;
       if( year_ends[0] > jd)

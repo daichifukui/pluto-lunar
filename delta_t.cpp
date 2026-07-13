@@ -20,9 +20,11 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
 #include <math.h>
 #include <stdio.h>
 #include <stdint.h>
+#include <limits.h>
 #include <assert.h>
 #include "watdefs.h"
 #include "afuncs.h"
+#include "mjd_defs.h"
 
 #ifdef __WATCOMC__
 #define sinl(x) ((long double)sin((double)x))
@@ -32,20 +34,25 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
 to check default_delta_t_string only for years before 1620.  This should
 have zero effect on the results,  but should save some CPU cycles.   */
 
-/* The following method for computing Delta-T works as follows.  For dates
-between 1620 and 2016,  the value comes from the 'delta_t_table' (copied
-in turn from Meeus' _Astronomical Algorithms_),  extended using data from
-the USNO sites referenced below.  The table gives delta-t at two-year
-intervals;  between those values,  a linear interpolation is used.  If
-the year is before 1620,  one of four polynomial approximations is used
-(see references below).   If the date is after the end of the table,
-a linear extrapolation is used,  with a quadratic term added to that
-which assumes an acceleration of 32.5 seconds/century^2.
+/* Delta-T is computed as follows.  For dates after 1620, the value
+comes from the 'delta_t_table'.  This was copied from Meeus'
+_Astronomical Algorithms_ and has been extended using data from the USNO
+sites referenced below.  The table gives delta-t at two-year intervals;
+between those values,  a linear interpolation is used.  If the year is
+before 1620,  one of four polynomial approximations is used (see
+references below).   If the date is after the end of the table, a linear
+extrapolation is used,  with a quadratic term added to that which
+assumes an acceleration of 32.5 seconds/century^2.
 
    Updated at two-year intervals to add a new Delta-T table entry from
 
 ftp://maia.usno.navy.mil/ser7/deltat.data
 ftp://maia.usno.navy.mil/ser7/deltat.preds
+
+   which is no longer available;  2020 and later uses
+
+ftp://ftp.iers.org/products/eop/rapid/standard/finals.all
+https://datacenter.iers.org/data/latestVersion/finals.all.iau1980.txt
 */
 
 static const short delta_t_table[] =
@@ -90,7 +97,11 @@ static const short delta_t_table[] =
   6660,    /* 2012  1 1:   66.6030                              */
   6728,    /* 2014  1 1:   67.2810                              */
   6810,    /* 2016  1 1:   68.1024                              */
-  6897 };  /* 2018  1 1:   68.9677                              */
+  6897,    /* 2018  1 1:   68.9677                              */
+  6936,    /* 2020  1 1:   UT1 - UTC = -0.1772554; 69.3612554   */
+  6929,    /* 2022  1 1:   UT1 - UTC = -0.1104988; 69.2944988   */
+  6918,    /* 2024  1 1:   UT1 - UTC =  0.0087688; 69.1752068   */
+  6911 };  /* 2026  1 1:   UT1 - UTC =  0.0740687; 69.1099313   */
 
 /* 8 Aug 2000:  Some people have expressed an interest in being able to
    insert their own formulae for Delta-T while running Guide.  I've
@@ -183,11 +194,15 @@ Delta-T string:
 
    Since then,  I've switched to quadratic and higher-order polynomials
 from the _Five Millennium Catalogue of Solar Eclipses_ by Espenak and
-Meeus,  as defined in the above default_delta_t_string.  */
+Meeus,  as defined in the above default_delta_t_string :
 
-double DLL_FUNC td_minus_ut( const double jd)
+https://eclipse.gsfc.nasa.gov/SEcat5/deltatpoly.html     */
+
+#define J2000 2451545.
+
+double default_td_minus_ut( const double jd)
 {
-   const double year = 2000. + (jd - 2451545.) / 365.25;
+   const double year = 2000. + (jd - J2000) / 365.25;
    double rval;
    /* first convert t from JD to years */
 
@@ -213,7 +228,7 @@ double DLL_FUNC td_minus_ut( const double jd)
       const int delta_t_table_size =
             sizeof( delta_t_table) / sizeof( delta_t_table[0]);
 
-      if( index > delta_t_table_size - 2)       /* running off end of table */
+      if( index > delta_t_table_size - 2 || jd > 3e+7)   /* running off end of table */
          index = delta_t_table_size - 2;
       dt = index_loc - (double)index;
       tptr = delta_t_table + index;
@@ -236,10 +251,23 @@ double DLL_FUNC td_minus_ut( const double jd)
    return( rval);
 }
 
+/* If an Earth Orientation Parameters (EOP) file has been loaded,  and
+its time span covers the input JD,  you'll get a very precise Delta-T
+value.  (See eop_prec.cpp.)  If that doesn't work out,  it'll fill in
+a Delta-T using the above method.   */
+
+double DLL_FUNC td_minus_ut( const double jd)
+{
+   earth_orientation_params eop;
+
+   get_earth_orientation_params( jd, &eop, 4);
+   return( eop.tdt_minus_ut1);
+}
+
 /* Some notes for other time systems that I may,  someday,  get around
 to implementing:
 
-TDT = TAI + 32.184 seconds
+TDT = TAI + 32.184 seconds = TAI + 0.0003725 days,  exactly
 
 TAI & UTC differ by an integer number of seconds;  after 2012 Jul 1,
 for example,  TAI-UTC = 35 seconds,  TDT-UTC = 67.184 seconds.
@@ -277,8 +305,19 @@ TD-UTC = td_minus_tai + floor( td_minus_ut + .5 - td_minus_tai)
 Delta-T as closely as possible (within half a second at the center of
 that half-year).
 
+   Note that eventually,  sometime around 2270,  this can result in two
+leap seconds being added at the end of June or December.  As currently
+defined,  we would instead start inserting leap seconds at the end of
+March or September.  Eventually,  if that wasn't enough,  we'd insert a
+leap second at the end of every month.  My only excuse is that I expect
+to be dead by 2270.
+
    You may not like this so-called "solution".  I don't,  either.  I'm
-open to ideas,  but doubt there is a better "solution".
+open to ideas,  but doubt there is a better "solution".  If you don't
+like it,  set the global variable 'mjd_end_of_predictive_leap_seconds'
+to (MJD) 59215 = 2021 Jan 1.  (Note that this can even be set to shut
+off leap seconds that have already elapsed,  though I can't come up
+with a situation where you'd want to do that.)
 
    Also,  note that before 1961 Jan 1 = MJD 37400, there was no "real" UTC,
 and we assume UTC=UT.  From then until 1972 Jan 1 = MJD 41317, the idea
@@ -329,28 +368,10 @@ long double DLL_FUNC tdb_minus_tdt( const long double t_centuries)
    return( rval);     /* difference is in _seconds_  */
 }
 
-/* These macros determine the MJD of the given date in 'YEAR'.  They're
-valid for years after -9999 in the _Gregorian_ calendar.  Note that
-we use the fact that February 1 is always 31 days after January 1,
-but work backward from January 1 of the following year to get
-March to December without having to consider leap days. */
-
-#define JAN_1( YEAR) (((YEAR) * 365 + ((YEAR) + 9999) / 4 - ((YEAR) + 9999) / 100 \
-                         + ((YEAR) + 9999) / 400) - 681365)
-#define FEB_1( YEAR) (JAN_1( YEAR) + 31)
-#define DEC_1( YEAR) (JAN_1( (YEAR)+1) - 31)
-#define NOV_1( YEAR) (DEC_1( YEAR) - 30)
-#define OCT_1( YEAR) (NOV_1( YEAR) - 31)
-#define SEP_1( YEAR) (OCT_1( YEAR) - 30)
-#define AUG_1( YEAR) (SEP_1( YEAR) - 31)
-#define JUL_1( YEAR) (AUG_1( YEAR) - 31)
-#define JUN_1( YEAR) (JUL_1( YEAR) - 30)
-#define MAY_1( YEAR) (JUN_1( YEAR) - 31)
-#define APR_1( YEAR) (MAY_1( YEAR) - 30)
-#define MAR_1( YEAR) (APR_1( YEAR) - 31)
-
 #define utc0  (JAN_1( 1972))
       /*  'utc0' = MJD of date when the UTC leap seconds began */
+
+int mjd_end_of_predictive_leap_seconds = INT_MAX;
 
 double DLL_FUNC td_minus_utc( const double jd_utc)
 {
@@ -392,7 +413,7 @@ double DLL_FUNC td_minus_utc( const double jd_utc)
       }
    else              /* integral leap seconds */
       {
-      const int imjd_utc = (int)mjd_utc;
+      int imjd_utc = (int)mjd_utc;
       static const unsigned short leap_intervals[] = {
                  JAN_1( 1972) - utc0, JUL_1( 1972) - utc0, JAN_1( 1973) - utc0,
                  JAN_1( 1974) - utc0, JAN_1( 1975) - utc0, JAN_1( 1976) - utc0,
@@ -403,24 +424,26 @@ double DLL_FUNC td_minus_utc( const double jd_utc)
                  JUL_1( 1993) - utc0, JUL_1( 1994) - utc0, JAN_1( 1996) - utc0,
                  JUL_1( 1997) - utc0, JAN_1( 1999) - utc0, JAN_1( 2006) - utc0,
                  JAN_1( 2009) - utc0, JUL_1( 2012) - utc0, JUL_1( 2015) - utc0,
-                 JAN_1( 2017) - utc0  };
+                 JAN_1( 2017) - utc0 };
       const int n_leap_seconds = sizeof( leap_intervals) / sizeof( leap_intervals[0]);
 
-      if( imjd_utc >= JUL_1( 2017))
+      if( imjd_utc > mjd_end_of_predictive_leap_seconds)
+         imjd_utc = mjd_end_of_predictive_leap_seconds;
+      if( imjd_utc >= DEC_1( 2021))
          {
          int day = imjd_utc + 2400000 - 1721058;
          int year = (int)( (int64_t)day * (int64_t)400 / (int64_t)146097);
          int low, high, july_1;
 
-         low = JAN_1( year);     /* The above value for 'year' is correct */
+         low = (int)JAN_1( year);  /* The above value for 'year' is correct */
          if( imjd_utc < low)     /* more than 99% of the time.  But we    */
             {                    /* may find,  for 31 December,  that     */
             year--;              /* it's too high by one year.            */
             high = low;
-            low = JAN_1( year);
+            low = (int)JAN_1( year);
             }
          else
-            high = JAN_1( year + 1);
+            high = (int)JAN_1( year + 1);
                       /*  jul  aug  sep  oct  nov  dec.. jul 1 is exactly 184 */
          july_1 = high - (31 + 31 + 30 + 31 + 30 + 31); /* days before jan 1  */
          if( imjd_utc < july_1) /* in first half of the year */
@@ -436,4 +459,11 @@ double DLL_FUNC td_minus_utc( const double jd_utc)
       }
                      /* still here?  Must be before jan 1961,  so UTC = UT1: */
    return( td_minus_ut( jd_utc));
+}
+
+double DLL_FUNC tdb_minus_utc( const double jd_utc)
+{
+   const double t_cen = (jd_utc - J2000) / 36525.;
+
+   return( tdb_minus_tdt( t_cen) / seconds_per_day + td_minus_utc( jd_utc));
 }
