@@ -1,0 +1,47 @@
+name: Build
+
+on: [push, pull_request]
+
+jobs:
+  buildUbuntu:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@master
+    - name: make
+      run: make ERRORS=Y
+
+  buildOSX:
+    runs-on: macOS-latest
+
+    steps:
+    - uses: actions/checkout@master
+    - name: make
+      run: make CLANG=Y ERRORS=Y
+
+  buildWindowsX64:
+    runs-on: windows-2022
+
+    steps:
+    - uses: actions/checkout@master
+    - name: make
+      run: |
+        call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
+        nmake -f lunar.mak
+      shell: cmd
+    - name: Archive .EXEs
+      uses: actions/upload-artifact@v4
+      with:
+         name: exes
+         path: '*.exe'
+
+  buildWindowsX86:
+    runs-on: windows-2022
+
+    steps:
+    - uses: actions/checkout@master
+    - name: make
+      run: |
+        call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x86
+        nmake -f lunar.mak BITS_32=Y
+      shell: cmd

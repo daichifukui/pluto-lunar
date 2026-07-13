@@ -66,7 +66,7 @@ extern const char *french_extra_day_names[6] = {
         "Jour de la revolution (Revolution Day)" };
 #endif
 
-
+#ifdef LOAD_CHINESE_CALENDAR_DATA_FROM_FILE
 /* The Chinese calendar involves added complications for two reasons.
 First,  instead of being computed algorithmically (as all the other
 calendars are),  it's computed using a pre-compiled data table.  So you
@@ -115,6 +115,7 @@ static int load_chinese_calendar_data( const char *filename)
       }
    return( rval);
 }
+#endif    /* #ifdef LOAD_CHINESE_CALENDAR_DATA_FROM_FILE */
 
 #if !defined( _MSC_VER) && !defined( __WATCOMC__)
 static void error_exit( void)  __attribute__ ((noreturn));
@@ -132,9 +133,69 @@ static void error_exit( void)
    exit( -1);
 }
 
+/* 'greg_day_to_dmy' converts a JD to day/month/year for all dates (not
+just those after 1 Jan -4800 or similar).  Unlike the version in 'date.cpp'
+(q.v),  it does so only for the Gregorian calendar,  but it is slightly
+more efficient.  After testing,  I decided it's not worth the code bloat.
+I leave it here in case I come across a situation where the very small
+performance boost might be considered significant.   */
+
+void DLL_FUNC greg_day_to_dmy( const long jd, int DLLPTR *day,
+                  int DLLPTR *month, long DLLPTR *year)
+{
+   const long mar_1_year_0 = 1721120L;     /* JD 1721120 = 1.5 Mar 0 Greg */
+   const long one_year = 365L;
+   const long four_years = 4 * one_year + 1;
+   const long century = 25 * four_years - 1L;  /* days in 100 'normal' yrs */
+   const long quad_cent = century * 4 + 1;     /* days in 400 years */
+   long days = jd - mar_1_year_0;
+   long day_in_cycle = days % quad_cent;
+
+   if( day_in_cycle < 0)
+      day_in_cycle += quad_cent;
+   *year = ((days - day_in_cycle) / quad_cent) * 400L;
+   *year += (day_in_cycle / century) * 100L;
+   if( day_in_cycle == quad_cent - 1)    /* extra leap day every 400 years */
+      {
+      *month = 2;
+      *day = 29;
+      return;
+      }
+   day_in_cycle %= century;
+   *year += (day_in_cycle / four_years) * 4L;
+   day_in_cycle %= four_years;
+   *year +=  day_in_cycle / one_year;
+   if( day_in_cycle == four_years - 1)    /* extra leap day every 4 years */
+      {
+      *month = 2;
+      *day = 29;
+      return;
+      }
+   day_in_cycle %= one_year;
+   *month = 5 * (day_in_cycle / 153L);
+   day_in_cycle %= 153L;
+   *month += 2 * (day_in_cycle / 61L);
+   day_in_cycle %= 61L;
+   if( day_in_cycle >= 31)
+      {
+      (*month)++;
+      day_in_cycle -= 31;
+      }
+   *month += 3;
+   *day = day_in_cycle + 1;
+   if( *month > 12)
+      {
+      *month -= 12;
+      (*year)++;
+      }
+}
+
 int main( int argc, char **argv)
 {
-   int calendar, err_code, i, is_ut;
+#ifdef LOAD_CHINESE_CALENDAR_DATA_FROM_FILE
+   int err_code;
+#endif
+   int calendar = CALENDAR_JULIAN_GREGORIAN, i, is_ut;
    const double tdt_minus_tai = 32.184;
    const double tai_minus_gps = 19.;
    const long double j2000 = 2451545.;
@@ -144,26 +205,39 @@ int main( int argc, char **argv)
    double jd;
    char buff[90];
 
-   if( argc < 2)
-      strcpy( buff, "+0");          /* show current time */
-   else
-      {
-      strcpy( buff, argv[1]);
-      for( i = 2; i < argc; i++)
+   *buff = '\0';
+   for( i = 1; i < argc; i++)
+      if( !memcmp( argv[i], "-c", 2))
+         calendar = atoi( argv[i] + 2);
+      else if( !memcmp( argv[i], "-e", 2))
          {
-         strcat( buff, " ");
+         const int max_mjd = load_earth_orientation_params( argv[i] + 2, NULL);
+
+         if( max_mjd < 0)
+            printf( "Error %d loading EOPs\n", max_mjd);
+         else
+            printf( "EOPs run to MJD %d\n", max_mjd);
+         }
+      else
+         {
+         if( *buff)
+            strcat( buff, " ");
          strcat( buff, argv[i]);
          }
-      }
+
+   if( !*buff)
+      strcpy( buff, "+0");          /* show current time */
 
    t2k = get_time_from_stringl( t2k, buff,
-        CALENDAR_JULIAN_GREGORIAN | FULL_CTIME_YMD | FULL_CTIME_TWO_DIGIT_YEAR, &is_ut);
+        calendar | FULL_CTIME_YMD | FULL_CTIME_TWO_DIGIT_YEAR, &is_ut);
 
    if( is_ut < 0)
       printf( "Error parsing string: %d\n", is_ut);
+#ifdef LOAD_CHINESE_CALENDAR_DATA_FROM_FILE
    err_code = load_chinese_calendar_data( "chinese.dat");
    if( err_code)
       printf( "WARNING:  Chinese calendar data not loaded: %d\n", err_code);
+#endif    /* #ifdef LOAD_CHINESE_CALENDAR_DATA_FROM_FILE */
 
    if( t2k + j2000 == 0.)    /* no date found in command line;  show an error message: */
       error_exit( );
@@ -172,6 +246,9 @@ int main( int argc, char **argv)
       full_ctimel( buff, t2k, CALENDAR_JULIAN_GREGORIAN | FULL_CTIME_YMD
                    | FULL_CTIME_DAY_OF_WEEK_FIRST | FULL_CTIME_12_PLACES);
       printf( "%s = JD %.8Lf\n", buff, t2k + j2000);
+      full_ctimel( buff, t2k, CALENDAR_JULIAN_GREGORIAN | FULL_CTIME_DAY_OF_YEAR
+                   | FULL_CTIME_12_PLACES | FULL_CTIME_FORMAT_DAY);
+      printf( "Day of year = %s\n", buff);
       for( calendar = 0; calendar < 9; calendar++)
          {
          int day, month;
@@ -200,15 +277,28 @@ int main( int argc, char **argv)
                         year, month, is_intercalary, day);
          }
       }
+
+   {
+   int day, month;         /* Test alternative Gregorian date decryption */
+   long year;              /* (see 'greg_day_to_dmy' and comments above) */
+
+   greg_day_to_dmy( (long)floorl( t2k + .5 + j2000), &day, &month, &year);
+   printf( "%-20s %4ld%3d %3d\n", "New greg",
+                        year, month, day);
+   }
+
+
    jd = (double)( t2k + j2000);
-   printf( "Delta-T = TD - UT1 = %.4f; TD - UTC = %.4f; UT1 - UTC = DUT1 = %.4f\n",
+   printf( "Delta-T = TD - UT1 = %.7f; TD - UTC = %.7f; UT1 - UTC = DUT1 = %.7f\n",
                             td_minus_ut( jd),
                             td_minus_utc( jd),
                             td_minus_utc( jd) - td_minus_ut( jd));
-   printf( "TDB - TDT = %f milliseconds   TAI-UTC = %.3f    GPS-UTC = %.3f\n",
+   printf( "TDB - TDT = %.4f milliseconds   TAI-UTC = %.3f    GPS-UTC = %.3f\n",
          (double)tdb_minus_tdt( t2k / 36525.) * 1000.,
          td_minus_utc( jd) - tdt_minus_tai,
          td_minus_utc( jd) - tdt_minus_tai - tai_minus_gps);
+#ifdef LOAD_CHINESE_CALENDAR_DATA_FROM_FILE
    load_chinese_calendar_data( NULL);
+#endif    /* #ifdef LOAD_CHINESE_CALENDAR_DATA_FROM_FILE */
    return( 0);
 }

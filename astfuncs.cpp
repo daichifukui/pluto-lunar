@@ -38,7 +38,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
 #define MIN_THRESH 1.e-14
 #define CUBE_ROOT( X)  (exp( log( X) / 3.))
 
-static double kepler( const double ecc, double mean_anom);
+double kepler( const double ecc, double mean_anom);
 void setup_orbit_vectors( ELEMENTS DLLPTR *e);  /* astfuncs.cpp */
 void comet_posn_part_ii( const ELEMENTS DLLPTR *elem, const double t,
                                     double DLLPTR *loc, double DLLPTR *vel);
@@ -67,7 +67,7 @@ int DLL_FUNC setup_elems_from_ast_file( ELEMENTS DLLPTR *class_elem,
                /* I should have done right from the beginning.             */
    if( elem[1] > VERY_LARGE_AXIS)   /* kludge to accommodate large axes */
       {
-      double tval = 4. - class_elem->major_axis / 10.5;
+      const double tval = 4. - class_elem->major_axis / 10.5;
 
       class_elem->major_axis = 63. / tval;
       }
@@ -93,7 +93,7 @@ to the direction of perihelion. */
 void setup_orbit_vectors( ELEMENTS DLLPTR *e)
 {
    const double sin_incl = sin( e->incl), cos_incl = cos( e->incl);
-   double FAR *vec;
+   double FAR *vec = e->perih_vec;
    double vec_len;
    double up[3];
    unsigned i;
@@ -101,7 +101,6 @@ void setup_orbit_vectors( ELEMENTS DLLPTR *e)
    e->minor_to_major = sqrt( fabs( 1. - e->ecc * e->ecc));
    e->lon_per = e->asc_node + atan2( sin( e->arg_per) * cos_incl,
                                        cos( e->arg_per));
-   vec = e->perih_vec;
 
    vec[0] = cos( e->lon_per) * cos_incl;
    vec[1] = sin( e->lon_per) * cos_incl;
@@ -151,7 +150,7 @@ elliptical case,  where in Kepler's equation,
 
 M = E - e sin( E)
 
-   E and e sin( E) can be almost identical quantities.  To
+   E and e sin( E) can be almost identical quantities.  To work
 around this,  near_parabolic( ) computes E - e sin( E) by expanding
 the sine function as a power series:
 
@@ -180,14 +179,15 @@ static double near_parabolic( const double ecc_anom, const double e)
    return( rval);
 }
 
-/* For a full description of this function,  see KEPLER.HTM on the Guide
-Web site,  http://www.projectpluto.com.  There was a long thread about
+/* For a full description of this function,  see
+https://www.projectpluto.com/kepler.htm . There was a long thread about
 solutions to Kepler's equation on sci.astro.amateur,  and I decided to
-go into excruciating detail as to how it's done below. */
+go into excruciating detail as to how it's done below (admittedly,  some
+time ago,  and changes have occurred). */
 
 #define MAX_ITERATIONS 7
 
-static double kepler( const double ecc, double mean_anom)
+double kepler( const double ecc, double mean_anom)
 {
    double curr, err, thresh, offset = 0.;
    double delta_curr = 1.;
@@ -283,16 +283,15 @@ void comet_posn_part_ii( const ELEMENTS DLLPTR *elem, const double t,
 
    if( elem->ecc == 1.)    /* parabolic */
       {
-      double g = elem->w0 * t * .5;
+      const double g = elem->w0 * t * .5;
 
       y = CUBE_ROOT( g + sqrt( g * g + 1.));
       true_anom = 2. * atan( y - 1. / y);
       }
    else           /* got the mean anomaly;  compute eccentric,  then true */
       {
-      double ecc_anom;
+      const double ecc_anom = kepler( elem->ecc, elem->mean_anomaly);
 
-      ecc_anom = kepler( elem->ecc, elem->mean_anomaly);
       if( elem->ecc > 1.)     /* hyperbolic case */
          {
          x = (elem->ecc - cosh( ecc_anom));
@@ -311,17 +310,20 @@ void comet_posn_part_ii( const ELEMENTS DLLPTR *elem, const double t,
    r = r0 / (1. + elem->ecc * cos( true_anom));
    x = r * cos( true_anom);
    y = r * sin( true_anom);
-   loc[0] = elem->perih_vec[0] * x + elem->sideways[0] * y;
-   loc[1] = elem->perih_vec[1] * x + elem->sideways[1] * y;
-   loc[2] = elem->perih_vec[2] * x + elem->sideways[2] * y;
-   loc[3] = r;
+   if( loc)
+      {
+      loc[0] = elem->perih_vec[0] * x + elem->sideways[0] * y;
+      loc[1] = elem->perih_vec[1] * x + elem->sideways[1] * y;
+      loc[2] = elem->perih_vec[2] * x + elem->sideways[2] * y;
+      loc[3] = r;
+      }
    if( vel && (elem->angular_momentum != 0.))
       {
-      double angular_component = elem->angular_momentum / (r * r);
-      double radial_component = elem->ecc * sin( true_anom) *
+      const double angular_component = elem->angular_momentum / (r * r);
+      const double radial_component = elem->ecc * sin( true_anom) *
                                 elem->angular_momentum / (r * r0);
-      double x1 = x * radial_component - y * angular_component;
-      double y1 = y * radial_component + x * angular_component;
+      const double x1 = x * radial_component - y * angular_component;
+      const double y1 = y * radial_component + x * angular_component;
       unsigned i;
 
       for( i = 0; i < 3; i++)
@@ -351,4 +353,15 @@ int DLL_FUNC comet_posn_and_vel( ELEMENTS DLLPTR *elem, double t,
 int DLL_FUNC comet_posn( ELEMENTS DLLPTR *elem, double t, double DLLPTR *loc)
 {
    return( comet_posn_and_vel( elem, t, loc, NULL));
+}
+
+double DLL_FUNC phase_angle_correction_to_magnitude( const double phase_angle,
+                                 const double slope_param)
+{
+      const double epsilon = 1e-10;
+      const double log_tan_half_phase = log( tan( phase_angle / 2.) + epsilon);
+      const double phi1 = exp( -3.33 * exp( log_tan_half_phase * 0.63));
+      const double phi2 = exp( -1.87 * exp( log_tan_half_phase * 1.22));
+
+      return( -2.5 * log10( (1. - slope_param) * phi1 + slope_param * phi2));
 }

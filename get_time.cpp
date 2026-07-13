@@ -174,6 +174,11 @@ static inline long double collect_time_offset( char *istr)
    return( rval);
 }
 
+#if (defined(_MSC_VER) && _MSC_VER < 1900) || defined __WATCOMC__
+      /* OpenWATCOM and older MSVCs lack strtold */
+   #define strtold strtod
+#endif
+
 static size_t remove_trailing_spaces( char *istr)
 {
    size_t len = strlen( istr);
@@ -236,14 +241,14 @@ static int check_for_bc( char *timestr)
 /* full moon,  '1q-2' for two days before first quarter... or just use */
 /* 'nm', '3q',  etc.  Uses formulae from Meeus, _Astronomical          */
 /* Algorithms_,  chap 47, for a very approximate lunar age (I ignored  */
-/* terms greater than about half an hour.)                             */
+/* terms greater than about one minute;  with cancellation,  results   */
+/* are usually good to a minute or two.)                               */
 
 #define PHASE_IDX_UNDEFINED        -1
-/*       The following aren't explicitly used,  and are given just
-#define PHASE_IDX_NEW_MOON          0              for reference
+#define PHASE_IDX_NEW_MOON          0
 #define PHASE_IDX_FIRST_QUARTER     1
 #define PHASE_IDX_FULL_MOON         2
-#define PHASE_IDX_THIRD_QUARTER     3                           */
+#define PHASE_IDX_THIRD_QUARTER     3
 
 static int get_phase_idx( const char *istr)
 {
@@ -255,28 +260,72 @@ static int get_phase_idx( const char *istr)
    return( rval);
 }
 
-static long double set_from_lunar( const int phase_idx, const long double t2k)
-{
-   const long double phase = (long double)phase_idx * .25;
-   const long double pi = 3.1415926535897932384626433832795028841971693993751058209749445923;
-   const long double deg2rad = pi / 180.;
-   const long double t0 = 2451550.09765 - J2000;
-   const long double lunation = 29.530588853;
-   const long double k = floorl((t2k - t0) / lunation - phase + .5) + phase;
-   const long double amplit = ((phase_idx & 1) ? -.62801 : -.40720);
-   const long double t = t0 + k * lunation;
-
-   return( t
-      + amplit * sinl( 201.5643 * deg2rad + (385.81693528 * deg2rad) * k)
-      + .17241 * sinl(   2.5534 * deg2rad + (29.10535669 * deg2rad) * k));
-}
-
-/* I ran across a system without a strtold() function.  Hard to imagine... */
-
-#ifndef strtold
-#define strtold(a,b) (long double)strtod(a,b)
+static const long double lunation = 29.530588853;
+#ifdef __WATCOMC__
+         /* OpenWATCOM insists on constants being 'explicit' : */
+   static const long double deg2rad =        /* pi / 180.; */
+            0.0174532925199432957692369076848861271344287188854172545609719144017;
+   static const long double lunar_phase_t0 = 5.09765;
+#else
+   static const long double pi =
+     3.1415926535897932384626433832795028841971693993751058209749445923;
+   static const long double deg2rad = pi / 180.;
+   static const long double lunar_phase_t0 = 2451550.09765 - J2000;
 #endif
 
+static long double get_phase_time( const long double k, const int phase_idx)
+{
+         /* sun,  moon mean anomalies,  Meeus (47.4) & (47.5) */
+   const long double moon_ma = 201.5643 * deg2rad + (385.81693528 * deg2rad) * k;
+   const long double sun_ma =    2.5534 * deg2rad + (29.10535669 * deg2rad) * k;
+         /* F = moon's argument of latitude : */
+   const long double f =       160.7108 * deg2rad + (390.67050274 * deg2rad) * k;
+   long double rval = lunar_phase_t0 + k * lunation;
+   const long double *aptr;
+   const long double amplit[3][9] = {
+      /* M'       M       2M'     2F      M'-M      M'+M    2M        M'-2F    M'+2F */
+   { -.40720, +.17241, +.01608, +.01039, +.00739, -.00514, +.00208, -.00111, -.00057 },
+   { -.62801, +.17172, +.00862, +.00804, +.00454, -.01183, +.00204, -.00180, -.00070 },
+   { -.40614, +.17302, +.01614, +.01043, +.00734, -.00515, +.00209, -.00111, -.00057 }};
+            /* above are amplitudes for new,  quarters,  and full moons */
+
+   if( phase_idx == PHASE_IDX_FIRST_QUARTER)
+      rval += 0.00306;
+   if( phase_idx == PHASE_IDX_THIRD_QUARTER)
+      {
+      rval -= 0.00306;
+      aptr = amplit[1];      /* use 1st quarter amplitudes */
+      }
+   else
+      aptr = amplit[phase_idx];
+   rval += aptr[0] * sinl( moon_ma) + aptr[1] * sinl( sun_ma);
+   rval += aptr[2] * sinl( 2. * moon_ma);
+   rval += aptr[3] * sinl( 2. * f);
+   rval += aptr[4] * sinl( moon_ma - sun_ma);
+   rval += aptr[5] * sinl( moon_ma + sun_ma);
+   rval += aptr[6] * sinl( 2. * sun_ma);
+   rval += aptr[7] * sinl( moon_ma - 2. * f);
+   rval += aptr[8] * sinl( moon_ma + 2. * f);
+   return( rval);
+}
+
+#ifdef __cplusplus
+extern "C" {
+#endif /* #ifdef __cplusplus */
+long double DLL_FUNC find_nearest_lunar_phase_time(
+                         const int phase_idx, const long double t2k);
+#ifdef __cplusplus
+}
+#endif  /* #ifdef __cplusplus */
+
+long double DLL_FUNC find_nearest_lunar_phase_time(
+                         const int phase_idx, const long double t2k)
+{
+   const long double phase = (long double)phase_idx * .25;
+   const long double k = floorl((t2k - lunar_phase_t0) / lunation - phase + .5) + phase;
+
+   return( get_phase_time( k, phase_idx));
+}
 
 /* get_time_from_string( ) first (*) checks for four simple types of input:
 'J' or 'JD' followed by a Julian Day,  'y' followed by a decimal year,
@@ -366,6 +415,7 @@ long double DLL_FUNC get_time_from_stringl( long double initial_t2k,
    char buff[80];
    char symbol = 0;
    char *str = buff;
+   const long double jan_1_1970 = 2440587.5;      /* starting point for UNIX time */
 
    if( is_ut)
       *is_ut = 0;
@@ -409,7 +459,7 @@ long double DLL_FUNC get_time_from_stringl( long double initial_t2k,
          rval = get_time_from_stringl( initial_t2k, str, time_format, NULL);
          if( rval != -J2000 && is_ut)
             *is_ut = 1;
-         return( set_from_lunar( phase, rval) + offset);
+         return( find_nearest_lunar_phase_time( phase, rval) + offset);
          }
       }
 
@@ -427,14 +477,14 @@ long double DLL_FUNC get_time_from_stringl( long double initial_t2k,
    if( *str == 'y')      /* decimal years */
       rval = (strtold( str + 1, NULL) - 2000.) * 365.25 - .5;
 
-   if( !memcmp( str, "mjd", 3))                 /* modified JD */
+   if( !strncmp( str, "mjd", 3))                 /* modified JD */
       {
       rval = strtold( str + 3, NULL) + 2400000.5 - J2000;
       if( is_ut)
          *is_ut = 1;
       }
 
-   if( !memcmp( str, "gps ", 4))                 /* GPS WWWWD scheme */
+   if( !strncmp( str, "gps ", 4))                 /* GPS WWWWD scheme */
       {
       int week_and_day = 0;
       const double jan_6_1980 = 2444244.5;  /* zero point of GPS system */
@@ -446,14 +496,15 @@ long double DLL_FUNC get_time_from_stringl( long double initial_t2k,
                         + jan_6_1980 - J2000;
       }
 
-   if( !memcmp( str, "now", 3))
-      {
-      static const long double jan_1970 = 2440587.5;
+   if( !strncmp( str, "unix ", 5))
+      rval = atof( str + 5) / seconds_per_day + (jan_1_1970 - J2000);
 
+   if( !strncmp( str, "now", 3))
+      {
       str += 3;
       while( *str == ' ')
          str++;
-      initial_t2k = (jan_1970 - J2000) + (long double)time( NULL) / seconds_per_day;
+      initial_t2k = jan_1_1970 - J2000 + (long double)time( NULL) / seconds_per_day;
       }
 
    if( !*str)
@@ -495,18 +546,12 @@ long double DLL_FUNC get_time_from_stringl( long double initial_t2k,
       int j;
 
       for( j = 0; j < 4; j++)
-         {
-         const int slen = 3 + ((j & 1) << 1);
-
-         if( !strcmp( str + i - slen, search_text[j]))
+         if( remove_substring( str, search_text[j]))
             {
-            i -= slen;
-            str[i] = '\0';
             am_pm_indicator = (j >= 2 ? AM_PM_SET_TO_PM :
                                         AM_PM_SET_TO_AM);
             j = 4;   /* break out of loop */
             }
-         }
       }
 
             /* If the input text ends with something containing ':'s,     */
@@ -571,7 +616,7 @@ long double DLL_FUNC get_time_from_stringl( long double initial_t2k,
          {
          unsigned month_found = 0, n_fields_found = 2;
          unsigned year_found = 0, day_found = 0;
-         char tstr[80];
+         char tstr[80], *end_ptr;
          long double ivals[3];
 
          memcpy( tstr, str, (size_t)i);
@@ -585,9 +630,11 @@ long double DLL_FUNC get_time_from_stringl( long double initial_t2k,
             }
          else
             {
-            ivals[0] = strtold( tstr, NULL);
+            ivals[0] = strtold( tstr, &end_ptr);
             if( strchr( tstr, '.'))   /* decimal day given */
                day_found = 1;
+            if( end_ptr == tstr && is_ut)
+               *is_ut = -4;
             }
          str += i + 1;
          for( i = 0; str[i] && str[i] != symbol && str[i] != ' '; i++)
@@ -603,15 +650,18 @@ long double DLL_FUNC get_time_from_stringl( long double initial_t2k,
             }
          else
             {
-            ivals[1] = atof( tstr);
+            ivals[1] = strtold( tstr, &end_ptr);
             if( strchr( tstr, '.'))   /* decimal day given */
                day_found = 2;
+            if( end_ptr == tstr && is_ut)
+               *is_ut = -5;
             }
 
          if( *str == symbol)     /* maybe a third field was entered, but */
             {                       /* could be a time;  check for a ':' */
             str++;
             if( sscanf( str, "%79s", tstr) == 1)
+               {
                if( (ival = month_name_to_index( tstr)) != 0)
                   {
                   month_found = 3;
@@ -619,6 +669,13 @@ long double DLL_FUNC get_time_from_stringl( long double initial_t2k,
                   ivals[2] = (long double)ival;
                   str += strlen( tstr);
                   }
+               else        /* check to make sure it's a number */
+                  {
+                  strtold( str, &end_ptr);
+                  if( end_ptr == str && is_ut)
+                     *is_ut = -6;
+                  }
+               }
             if( n_fields_found == 2)
                if( sscanf( str, "%Lf%n", &ivals[2], &n_bytes) == 1)
                   if( str[n_bytes] != ':')
@@ -656,11 +713,11 @@ long double DLL_FUNC get_time_from_stringl( long double initial_t2k,
                if( dval > .999 && dval < 32.)
                   dday = dval;
                else
-                  year = (int)dval;
+                  year = (long)dval;
                }
             else if( year_found)         /* year/day of year format: */
                {
-               year = (int)ivals[year_found - 1];
+               year = (long)ivals[year_found - 1];
                month = 1;
                dday  = ivals[2 - year_found];
                }
@@ -729,14 +786,20 @@ long double DLL_FUNC get_time_from_stringl( long double initial_t2k,
             assert( year_found > 0 && year_found < 4);
             assert( month_found > 0 && month_found < 4);
             assert( day_found > 0 && day_found < 4);
-            year = (int)floorl( ivals[year_found - 1] + .5);
+            year = (long)floorl( ivals[year_found - 1] + .5);
             dday = ivals[day_found - 1];
             month = (int)( ivals[month_found - 1] + .5);
             }
 
          if( year > 0 && year < 100 && !is_bc)
             if( time_format & FULL_CTIME_TWO_DIGIT_YEAR)
-               year += (year < 40 ? 2000 : 1900);
+               {
+               const int curr_year = 1970 + (int)( time( NULL) / (1461 * 86400 / 4));
+                                  /* two-digit years are assumed to be  */
+               year += 1900;      /* between 60 years ago to 40 years hence */
+               while( year < curr_year - 60)
+                  year += 100;
+               }
          }
          break;
       case '\0':       /* no dividing symbols found */
