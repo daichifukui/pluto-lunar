@@ -1,13 +1,46 @@
-Index: pluto-lunar/makefile
-===================================================================
---- pluto-lunar.orig/makefile
-+++ pluto-lunar/makefile
-@@ -61,7 +61,7 @@ endif
+Description: Build 'integrat' as part of the default 'all' target
+ Upstream deliberately excludes 'integrat' from 'all' since it links
+ against the optional external '-ljpl' library. Debian's build-dep on
+ libpluto-jpl-eph-dev makes that library always available at build
+ time, so it is safe and useful to build 'integrat' by default in
+ the Debian package.
+ .
+ Doing so exposes a second, pre-existing bug: integrat.o has its own
+ explicit compile rule that never went through the CPPFLAGS-based
+ hardening applied to the general .cpp.o rule, and instead hardcodes
+ '-I $(INSTALL_DIR)/include'. Since INSTALL_DIR defaults to PREFIX
+ (~) at compile time, this expands to the literal, non-existent path
+ '-I ~/include' (make does not perform shell tilde-expansion), so
+ integrat.cpp fails to find watdefs.h even when
+ libpluto-jpl-eph-dev is correctly installed:
+ .
+   integrat.cpp:29:10: fatal error: watdefs.h: No such file or directory
+ .
+ This was never noticed before because 'integrat' wasn't part of the
+ default build. Fix the rule to use $(CPPFLAGS) like every other
+ compile rule, instead of a separate, stale include path.
+Author: Fukui Daichi <a.dog.will.talk@akane.waseda.jp>
+Forwarded: not-needed
+Last-Update: 2026-09-07
+diff --git a/makefile b/makefile
+index 0e66de6..a0c97f5 100644
+--- a/makefile
++++ b/makefile
+@@ -132,7 +132,7 @@ endif
+ all: add_off$(EXE) add_off.cgi adestest$(EXE) astcheck$(EXE) astephem$(EXE) \
+    calendar$(EXE) cgicheck$(EXE) chinese$(EXE) colors$(EXE) \
+    colors2$(EXE) cosptest$(EXE) csv2ades$(EXE) desigcgi$(EXE) dist$(EXE) \
+-   easter$(EXE) get_test$(EXE) gtest$(EXE) htc20b$(EXE) jd$(EXE)\
++   easter$(EXE) get_test$(EXE) gtest$(EXE) htc20b$(EXE) integrat$(EXE) jd$(EXE)\
+    jevent$(EXE) jpl2b32$(EXE) jpl_url$(EXE) jsattest$(EXE) lun_test$(EXE) \
+    marstime$(EXE) moidtest$(EXE) mpc2sof$(EXE) mpc_time$(EXE) oblitest$(EXE) \
+    persian$(EXE) parallax$(EXE) parallax.cgi phases$(EXE) \
+@@ -279,7 +279,7 @@ integrat$(EXE): integrat.o $(LIBLUNAR)
+ 	$(CC) $(CFLAGS) -o integrat$(EXE) integrat.o $(LIBLUNAR) $(LIBSADDED) -L $(INSTALL_DIR)/lib -ljpl
  
- all: adestest$(EXE) astcheck$(EXE) astephem$(EXE) calendar$(EXE) cgicheck$(EXE)  \
-    colors$(EXE) colors2$(EXE) cosptest$(EXE) dist$(EXE) easter$(EXE) \
--   get_test$(EXE) htc20b$(EXE) jd$(EXE) \
-+   get_test$(EXE) htc20b$(EXE) integrat$(EXE) jd$(EXE) \
-    jevent$(EXE) jpl2b32$(EXE) jsattest$(EXE) lun_test$(EXE) \
-    marstime$(EXE) mpc2sof$(EXE) oblitest$(EXE) persian$(EXE) phases$(EXE) \
-    prectest$(EXE) prectes2$(EXE) ps_1996$(EXE) ssattest$(EXE) tables$(EXE) \
+ integrat.o: integrat.cpp
+-	$(CXX) $(CXXFLAGS) -c -I $(INSTALL_DIR)/include $<
++	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -c $<
+ 
+ jd$(EXE): jd.o $(LIBLUNAR)
+ 	$(CC) $(CFLAGS) -o jd$(EXE) jd.o $(LIBLUNAR) $(LIBSADDED)
