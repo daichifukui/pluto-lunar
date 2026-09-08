@@ -1,0 +1,81 @@
+Description: Drop stale watdefs.h references from the makefile
+ watdefs.h was intentionally removed from this source tree in 2018,
+ in favour of the build-dependency on libpluto-jpl-eph-dev, but five
+ build targets (mpc2sof, mpc_code, parallax, parallax.cgi, ps_1996)
+ still list it as a literal make prerequisite, and 'install'/
+ 'uninstall' still try to copy/remove a local copy of it.
+ .
+ Listing a header as a prerequisite is unrelated to whether the
+ compiler can find it via -I: make requires every prerequisite to
+ either exist as a file or have a rule to build one, and since no
+ such file or rule exists for watdefs.h, make fails outright before
+ the compiler is ever invoked:
+ .
+   make[1]: *** No rule to make target 'watdefs.h', needed by
+   'mpc2sof'.  Stop.
+ .
+ This was never noticed before because these five targets are only
+ reachable once every other Debian-specific build issue upstream of
+ them (the missing INTENTIONALLY_UNUSED_PARAMETER macro, -Wdate-time,
+ the integrat.o include path) has already been fixed.
+ .
+ Drop watdefs.h from the five prerequisite lists (compilation is
+ unaffected either way, since it already finds the header via -I),
+ and drop the install/uninstall steps for it, since this package no
+ longer owns that file.
+Author: Fukui Daichi <a.dog.will.talk@akane.waseda.jp>
+Forwarded: not-needed
+Last-Update: 2026-09-07
+diff --git a/makefile b/makefile
+index 16257af..22e4d8a 100644
+--- a/makefile
++++ b/makefile
+@@ -154,7 +154,6 @@ install: $(LIBLUNAR)
+ 	$(CP) showelem.h $(INSTALL_DIR)/include
+ 	$(CP) stringex.h $(INSTALL_DIR)/include
+ 	$(CP) vislimit.h $(INSTALL_DIR)/include
+-	$(CP) watdefs.h  $(INSTALL_DIR)/include
+ 	$(MKDIR) $(LIB_DIR)
+ 	$(CP) $(LIBLUNAR) $(LIB_DIR)
+ 	$(MKDIR) $(INSTALL_DIR)/bin
+@@ -177,7 +176,6 @@ uninstall:
+ 	rm -f $(INSTALL_DIR)/include/showelem.h
+ 	rm -f $(INSTALL_DIR)/include/stringex.h
+ 	rm -f $(INSTALL_DIR)/include/vislimit.h
+-	rm -f $(INSTALL_DIR)/include/watdefs.h
+ 	rm -f $(INSTALL_DIR)/lib/$(LIBLUNAR)
+ 	rm -f $(INSTALL_DIR)/bin/astcheck$(EXE)
+ 	rm -f $(INSTALL_DIR)/bin/integrat$(EXE)
+@@ -308,19 +306,19 @@ mms$(EXE):                    mms.o $(LIBLUNAR)
+ moidtest$(EXE): moidtest.o $(LIBLUNAR)
+ 	$(CC) $(LDFLAGS) $(CFLAGS) -o moidtest$(EXE) moidtest.o $(LIBLUNAR) $(LIBSADDED)
+ 
+-mpc2sof$(EXE): mpc2sof.cpp mpcorb.o $(LIBLUNAR) watdefs.h date.h comets.h stringex.h
++mpc2sof$(EXE): mpc2sof.cpp mpcorb.o $(LIBLUNAR) date.h comets.h stringex.h
+ 	$(CXX) $(LDFLAGS) $(CPPFLAGS) $(CXXFLAGS) -o mpc2sof$(EXE) mpc2sof.cpp mpcorb.o $(LIBLUNAR) $(LIBSADDED)
+ 
+-mpc_code$(EXE): mpc_code.cpp snprintf.o mpc_func.h watdefs.h mpc_func.h lunar.h stringex.h
++mpc_code$(EXE): mpc_code.cpp snprintf.o mpc_func.h mpc_func.h lunar.h stringex.h
+ 	$(CXX) $(LDFLAGS) $(CPPFLAGS) $(CXXFLAGS) -o mpc_code$(EXE) mpc_code.cpp snprintf.o -DTEST_CODE
+ 
+ oblitest$(EXE): oblitest.o obliqui2.o $(LIBLUNAR)
+ 	$(CC) $(LDFLAGS) $(CFLAGS) -o oblitest$(EXE) oblitest.o obliqui2.o $(LIBLUNAR) $(LIBSADDED)
+ 
+-parallax.cgi: parallax.cpp $(LIBLUNAR) watdefs.h afuncs.h mpc_func.h stringex.h
++parallax.cgi: parallax.cpp $(LIBLUNAR) afuncs.h mpc_func.h stringex.h
+ 	$(CXX) $(LDFLAGS) $(CPPFLAGS) $(CXXFLAGS) -o parallax.cgi parallax.cpp $(LIBLUNAR) $(LIBSADDED) -DCGI_VERSION
+ 
+-parallax$(EXE): parallax.cpp $(LIBLUNAR) watdefs.h afuncs.h mpc_func.h stringex.h
++parallax$(EXE): parallax.cpp $(LIBLUNAR) afuncs.h mpc_func.h stringex.h
+ 	$(CXX) $(LDFLAGS) $(CPPFLAGS) $(CXXFLAGS) -o parallax$(EXE) parallax.cpp $(LIBLUNAR) $(LIBSADDED)
+ 
+ persian$(EXE): persian.o solseqn.o $(LIBLUNAR)
+@@ -335,7 +333,7 @@ prectest$(EXE): prectest.o $(LIBLUNAR)
+ prectes2$(EXE): prectes2.o $(LIBLUNAR)
+ 	$(CC) $(LDFLAGS) $(CFLAGS) -o prectes2$(EXE) prectes2.o $(LIBLUNAR) $(LIBSADDED)
+ 
+-ps_1996$(EXE): ps_1996.cpp $(LIBLUNAR) watdefs.h mpc_func.h lunar.h afuncs.h date.h stringex.h
++ps_1996$(EXE): ps_1996.cpp $(LIBLUNAR) mpc_func.h lunar.h afuncs.h date.h stringex.h
+ 	$(CC) $(LDFLAGS) $(CPPFLAGS) $(CFLAGS) -o ps_1996$(EXE) ps_1996.cpp $(LIBLUNAR) $(LIBSADDED)
+ 
+ relativi$(EXE): relativi.cpp $(LIBLUNAR)
