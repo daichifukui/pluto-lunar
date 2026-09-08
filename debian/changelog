@@ -1,3 +1,9 @@
+pluto-lunar (0.0~git20260904.d951918-1) UNRELEASED; urgency=medium
+
+  * New upstream version 0.0~git20260904.d951918
+
+ -- Fukui Daichi <a.dog.will.talk@akane.waseda.jp>  Tue, 08 Sep 2026 14:14:30 +0900
+
 pluto-lunar (0.0~git20180825.e34c1d1-1) unstable; urgency=medium
 
   * New upstream commits to disambiguate copyrights
