@@ -1,0 +1,73 @@
+Description: Drop __DATE__/__TIME__ from version banners
+ astcheck.cpp, jpl2b32.cpp, jsattest.cpp, and integrat.cpp all embed
+ the compiler's build timestamp in a diagnostic version banner via
+ __DATE__/__TIME__. Debian's default build flags include -Wdate-time
+ (to catch exactly this, since it breaks reproducible builds), and
+ this package also builds with -Werror, turning it into a hard
+ failure:
+ .
+   astcheck.cpp:576:40: error: macro '__DATE__' might prevent
+   reproducible builds [-Werror=date-time]
+ .
+ The timestamp is purely cosmetic in all four cases -- none of them
+ use it for anything but a human-readable banner -- so this just
+ drops it from the message instead of working around the warning.
+ jsattest.cpp and integrat.cpp keep their separate, legitimate
+ *runtime* timestamps (asctime/full_ctime), which are unaffected.
+Author: Fukui Daichi <a.dog.will.talk@akane.waseda.jp>
+Forwarded: not-yet
+Last-Update: 2026-09-07
+diff --git a/astcheck.cpp b/astcheck.cpp
+index 71b0f30..d5e6f25 100644
+--- a/astcheck.cpp
++++ b/astcheck.cpp
+@@ -573,7 +573,7 @@ static void err_message( void)
+ 
+ static void show_astcheck_info( void)
+ {
+-   printf( "ASTCHECK version %s %s\n", __DATE__, __TIME__);
++   printf( "ASTCHECK version\n");
+    printf( "%d objects\n", n_asteroids);
+ }
+ 
+diff --git a/integrat.cpp b/integrat.cpp
+index 9c36335..2587b4a 100644
+--- a/integrat.cpp
++++ b/integrat.cpp
+@@ -867,8 +867,8 @@ int main( int argc, const char **argv)
+    dest_jd = get_time_from_string( 0., argv[3], FULL_CTIME_YMD, NULL);
+    full_ctime( time_buff, dest_jd, 0);
+    snprintf( buff, sizeof( buff),
+-                   "Integrat version %s %s\nIntegrating to %s = JD %.5f\n",
+-                    __DATE__, __TIME__, time_buff, dest_jd);
++                   "Integrat\nIntegrating to %s = JD %.5f\n",
++                    time_buff, dest_jd);
+    printf( "%s", buff);
+    ofile = err_fopen( output_filename, "wb");
+    setvbuf( ofile, NULL, _IONBF, 0);
+diff --git a/jpl2b32.cpp b/jpl2b32.cpp
+index b18aefe..f9369a9 100644
+--- a/jpl2b32.cpp
++++ b/jpl2b32.cpp
+@@ -103,7 +103,7 @@ int main( const int argc, const char **argv)
+ 
+    fclose( ifile);
+    fprintf( ofile, "Ephemeris from JPL Horizons output\n");
+-   fprintf( ofile, "Created using 'jpl2b32', version %s\n", __DATE__);
++   fprintf( ofile, "Created using 'jpl2b32'\n");
+    fprintf( ofile, "Ephemeris converted %.24s\n", asctime( gmtime( &t0)));
+    printf( "JD0: %f   Step size: %f   %ld steps\n",
+                                jd0,  step_size, (long)n_written);
+diff --git a/jsattest.cpp b/jsattest.cpp
+index 00913b3..827c930 100644
+--- a/jsattest.cpp
++++ b/jsattest.cpp
+@@ -67,7 +67,7 @@ int main( const int argc, const char **argv)
+       return( -1);
+       }
+    printf( "All data in kilometers,  in J2000 ecliptic coords\n");
+-   printf( "Compiled %s %s; run %.24s\n", __DATE__, __TIME__, asctime( gmtime( &t0)));
++   printf( "Run %.24s\n", asctime( gmtime( &t0)));
+    printf( "   JDE         dx        dy        dz             ");
+    printf( "x          y          z         radial    along\n");
+    while( fgets( buff, sizeof( buff), ifile))
