@@ -1,6 +1,19 @@
-pluto-lunar (0.0~git20260904.d951918-1) UNRELEASED; urgency=medium
+pluto-lunar (0.0~git20260904.d951918+dfsg-1) UNRELEASED; urgency=medium
 
-  * New upstream version 0.0~git20260904.d951918
+  * New upstream version 0.0~git20260904.d951918+dfsg
+  * d/control: Bump Standards-Version to 4.7.4 (no changes needed)
+  * d/control: Switch to debhelper-compat (= 13), drop debian/compat
+  * d/control: Drop redundant Priority: optional field
+  * d/control: Set Section: libdevel for libpluto-lunar-dev
+  * d/rules: Drop -Wl,--as-needed linker flag, no longer needed since
+    Bullseye
+  * d/pluto-lunar.dirs: Drop empty usr/bin directory
+  * d/copyright: Advertise repackaging with +dfsg version suffix, as
+    Files-Excluded is used
+  * d/upstream/metadata: Add
+  * Add lintian overrides for the intentional /usr/lib/pluto/lunar
+    executable location and false-positive spelling checks, as documented
+    in debian/README.Debian
 
  -- Fukui Daichi <a.dog.will.talk@akane.waseda.jp>  Tue, 08 Sep 2026 14:14:30 +0900
 
