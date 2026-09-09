@@ -15,7 +15,14 @@ character of testing the library's function.
 The final destination of binaries, libraries and include files remains
 unclear across the pluto-* packages. For the time being, the include
 files shall all to go to /usr/include/pluto while the binaries go to
-/usr/lib/pluto/<packagename> and the .a files to /usr/lib . This is not
-ultimately nice and shall develop over something more consistent.
+/usr/libexec/pluto/<packagename> and the .a files to /usr/lib . This is
+not ultimately nice and shall develop over something more consistent.
 
  -- Steffen Moeller <moeller@debian.org>  Wed, 28 Feb 2018 09:58:52 +0100
+
+Following the same move applied to pluto-jpl-eph, the binaries of this
+package were relocated from /usr/lib/pluto/<packagename> to
+/usr/libexec/pluto/<packagename>, per FHS 3.0 and Debian Policy 4.1.5,
+which do not allow executables under /usr/lib.
+
+ -- Fukui Daichi <a.dog.will.talk@akane.waseda.jp>  Wed, 09 Sep 2026 00:00:00 +0900

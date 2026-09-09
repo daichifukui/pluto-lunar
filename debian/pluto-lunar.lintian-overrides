@@ -1,8 +1,3 @@
-# Per debian/README.Debian, binaries of this pluto-* package family are
-# intentionally placed under /usr/lib/pluto/<packagename> rather than
-# /usr/bin or /usr/libexec; the layout is shared with sibling packages.
-executable-in-usr-lib
-
 # "Lon"/"lon" are the astronomical abbreviation for longitude, not a
 # misspelling of "long".
 spelling-error-in-binary Lon Long

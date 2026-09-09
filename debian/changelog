@@ -11,9 +11,10 @@ pluto-lunar (0.0~git20260904.d951918+dfsg-1) UNRELEASED; urgency=medium
   * d/copyright: Advertise repackaging with +dfsg version suffix, as
     Files-Excluded is used
   * d/upstream/metadata: Add
-  * Add lintian overrides for the intentional /usr/lib/pluto/lunar
-    executable location and false-positive spelling checks, as documented
-    in debian/README.Debian
+  * Move binaries from /usr/lib/pluto/lunar to /usr/libexec/pluto/lunar,
+    per FHS 3.0 and Debian Policy 4.1.5 (executables don't belong under
+    /usr/lib), matching the same move done in pluto-jpl-eph
+  * Add lintian override for false-positive "Lon"/"lon" spelling checks
 
  -- Fukui Daichi <a.dog.will.talk@akane.waseda.jp>  Tue, 08 Sep 2026 14:14:30 +0900
 
